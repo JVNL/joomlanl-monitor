@@ -1,0 +1,47 @@
+name: Diff-zip bij release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-diff-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (met volledige geschiedenis en tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vorige tag bepalen
+        id: vorige
+        run: |
+          HUIDIGE_TAG="${GITHUB_REF_NAME}"
+          VORIGE_TAG=$(git tag --sort=-creatordate | grep -v "^${HUIDIGE_TAG}$" | head -n1)
+          echo "huidige=$HUIDIGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "vorige=$VORIGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Diff-zip bouwen
+        if: steps.vorige.outputs.vorige != ''
+        run: |
+          mkdir -p /tmp/diffbestanden
+          git diff --name-only --diff-filter=ACMR "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" > /tmp/gewijzigd.txt
+          while IFS= read -r bestand; do
+            mkdir -p "/tmp/diffbestanden/$(dirname "$bestand")"
+            cp "$bestand" "/tmp/diffbestanden/$bestand"
+          done < /tmp/gewijzigd.txt
+          git diff --name-only --diff-filter=D "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" > /tmp/verwijderd.txt
+          if [ -s /tmp/verwijderd.txt ]; then
+            cp /tmp/verwijderd.txt "/tmp/diffbestanden/VERWIJDERDE_BESTANDEN.txt"
+          fi
+          cd /tmp/diffbestanden && zip -r "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" .
+
+      - name: Diff-zip uploaden naar de release
+        if: steps.vorige.outputs.vorige != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.vorige.outputs.huidige }}" "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" --clobber

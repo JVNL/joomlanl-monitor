@@ -1,0 +1,53 @@
+﻿LEES DIT EERST - installatie van Mijn Websites Monitor v1.18
+
+Wat zit er in dit pakket?
+--------------------------
+Alle broncode van de monitor, inclusief een installatiewizard (installeer.php).
+Er zitten GEEN persoonlijke gegevens in dit pakket - geen wachtwoorden, geen
+sites, geen eigen instellingen. Wel is een lijst met extensies meegegeven
+waarvan al een werkende update-feed-URL bekend was, zodat je die later niet
+zelf hoeft op te zoeken.
+
+Stap 1: bestanden plaatsen
+---------------------------
+1. Pak dit zip-bestand op je eigen computer uit.
+2. Maak op je server een map aan waarin de monitor moet komen te staan
+   (bijv. "mapnaam" - kies zelf een naam die je logisch vindt).
+3. Upload ALLE uitgepakte bestanden naar die map, via FTP of SFTP.
+
+Stap 2: database aanmaken
+---------------------------
+1. Maak bij je hostingpartij een lege MySQL/MariaDB-database aan (en een
+   bijbehorende gebruiker met rechten op die database), als je die nog niet
+   hebt. Onthoud de databasenaam, gebruikersnaam en wachtwoord - die heb je
+   zo nodig.
+2. Er hoeft verder NIETS handmatig geïmporteerd te worden - dat doet de
+   installatiewizard in de volgende stap helemaal zelf.
+
+Stap 3: installatiewizard doorlopen
+-------------------------------------
+1. Open in je browser gewoon het domein/de map waar je de bestanden hebt
+   geplaatst, bijv. https://jouwdomein.nl/mapnaam/ - je wordt automatisch
+   naar de installatiewizard doorgestuurd zolang de installatie nog niet is
+   voltooid (je hoeft dus niet per se zelf "installeer.php" achter de URL
+   te typen, al werkt dat ook gewoon).
+2. Vul de gevraagde gegevens in: de databasegegevens van zojuist, het
+   e-mailadres waarop je meldingen wil ontvangen, en een gebruikersnaam +
+   wachtwoord om zelf op de monitor in te loggen.
+3. Klik op "Installeren". Dit maakt automatisch alle benodigde tabellen aan
+   en slaat je instellingen op.
+
+Stap 4: opruimen (aanbevolen)
+---------------------------------
+Na een geslaagde installatie verschijnt er een knop om "installeer.php"
+direct vanaf de pagina zelf te verwijderen - één klik is genoeg, geen FTP
+nodig. Gebruik je die knop niet, dan kan dit bestand ook prima blijven
+staan: het vergrendelt zichzelf automatisch na de installatie en weigert
+daarna nog te draaien, dus een gevaar vormt het niet - opruimen is puur een
+kwestie van netheid.
+
+Daarna kan je inloggen op https://jouwdomein.nl/mapnaam/index.php met de
+gebruikersnaam en het wachtwoord die je bij de installatie hebt ingevuld.
+
+Vragen of problemen? Neem contact op met degene van wie je dit pakket hebt
+gekregen.

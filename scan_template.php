@@ -1799,6 +1799,133 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         }
     }
 
+    // PATROON 17: Server-Side Request Forgery via cURL - de doel-URL van een
+    // uitgaand HTTP-verzoek komt rechtstreeks uit user-input, zonder enige
+    // validatie. Legitieme code die zelf een URL opbouwt (bv. een update-
+    // check naar een vaste, hardgecodeerde feed-URL) doet dit nooit met een
+    // superglobal als CURLOPT_URL-waarde; alleen een op afstand bestuurbare
+    // "URL-fetcher"-backdoor (vaak gebruikt om interne diensten te bereiken,
+    // of als tussenstation om andere payloads op te halen) ziet er zo uit.
+    if (!$verdacht && preg_match('/curl_setopt\s*\(\s*\$\w+\s*,\s*CURLOPT_URL\s*,\s*\$_(GET|POST|REQUEST|COOKIE)\b/i', $inhoud)) {
+        $reden = 'Doel-URL van een cURL-verzoek komt rechtstreeks uit user-input (CURLOPT_URL vanuit $_GET/$_POST/...) - SSRF/URL-fetcher-backdoor, BACKDOOR PATROON';
+        $verdacht = true;
+    }
+
+    // PATROON 18: XOR-decodeerlus als obfuscatietechniek. Op zichzelf is een
+    // XOR-lus geen bewijs van kwaad opzet (ook legitieme, eigen versleutel-
+    // routines gebruiken dit patroon), dus wordt dit alleen gemeld in
+    // combinatie met eval() ÉN superglobal-input in hetzelfde bestand -
+    // exact dezelfde conservatieve aanpak als bij de andere obfuscatie-
+    // patronen (chr()-ketens, byte-arrays) hierboven.
+    if (!$verdacht) {
+        $heeftXorLus = preg_match('/for\s*\(\s*\$\w+\s*=\s*0\s*;.{0,60}\^\s*\$\w+\s*\[.{0,20}%\s*(strlen|count)\s*\(/is', $inhoud);
+        if ($heeftXorLus
+            && preg_match('/\beval\s*\(/i', $inhoud)
+            && preg_match('/\$_(POST|GET|REQUEST|COOKIE|SESSION)\b/i', $inhoud)) {
+            $reden = 'XOR-decodeerlus i.c.m. eval() en superglobal-input - obfuscatietechniek om payload te ontsleutelen, OBFUSCATED BACKDOOR';
+            $verdacht = true;
+        }
+    }
+
+    // PATROON 19: mail() waarbij het ontvanger-adres (het EERSTE argument)
+    // rechtstreeks uit user-input komt. Een gewoon contactformulier gebruikt
+    // $_POST wél voor de inhoud (bericht, onderwerp, afzendernaam), maar
+    // vrijwel nooit voor het ontvanger-adres zelf - dat staat in legitieme
+    // code altijd vast (het eigen contactadres van de site). Een mail()-
+    // aanroep waarbij een bezoeker zelf het ontvanger-adres bepaalt, is een
+    // bekend patroon voor een open-mail-relay/spam-backdoor.
+    if (!$verdacht && preg_match('/\bmail\s*\(\s*\$_(GET|POST|REQUEST)\b/i', $inhoud)) {
+        $reden = 'mail() met het ontvanger-adres rechtstreeks uit $_GET/$_POST/$_REQUEST - open-mail-relay/spam-backdoor, BACKDOOR PATROON';
+        $verdacht = true;
+    }
+
+    // PATROON 20: Client-side JS-injectie ingebed in een PHP-bestand: een
+    // verborgen iframe (display:none) of een document.write() met
+    // unescape() - beide bekende technieken om malafide inhoud (drive-by
+    // download, doorverwijzing, spam-SEO) te tonen aan zoekmachines/
+    // bezoekers zonder dat de site-eigenaar het ziet bij een gewone
+    // paginaweergave. Anders dan de PHP-gerichte patronen hierboven richt
+    // dit patroon zich op ingebedde HTML/JS-payload, die bij een defacement
+    // vaak gewoon in een bestaand .php-bestand wordt geplakt in plaats van
+    // als los bestand te worden neergezet.
+    if (!$verdacht && preg_match('/document\.write\s*\(\s*unescape\s*\(/i', $inhoud)) {
+        $reden = 'document.write(unescape(...)) - obfuscated JavaScript-injectie, BACKDOOR PATROON';
+        $verdacht = true;
+    }
+    //
+    // LET OP (ontdekt augustus 2026, live op vrijwel alle klantsites): een
+    // verborgen iframe alléén is GEEN betrouwbaar signaal. Een jarenlang
+    // gangbare, volkomen onschuldige techniek voor bestand-uploaden-zonder-
+    // paginaherlading gebruikt exact zo'n verborgen iframe als "doelvenster"
+    // voor het formulier (form target="..."), zonder eigen src (of met
+    // src="" / src="about:blank") - puur om de respons op te vangen, niet
+    // om iets te laden. Dat patroon triggerde deze check op z'n eentje al
+    // op de uploader-sjabloon van een veelgebruikte forms-extensie
+    // (com_baforms), op vrijwel alle sites tegelijk. Daarom nu aanvullend
+    // eisen dat de iframe ook een externe, absolute src heeft (http(s)://
+    // naar een ander domein) - precies het kenmerk van een echte
+    // kwaadaardige doorverwijzing, en precies wat een upload-doelvenster
+    // nooit heeft.
+    if (!$verdacht && preg_match_all('/<iframe\b[^>]*>/i', $inhoud, $iframeTags)) {
+        foreach ($iframeTags[0] as $iframeTag) {
+            $heeftDisplayNone = preg_match('/style\s*=\s*["\']?[^"\'>]*display\s*:\s*none/i', $iframeTag);
+            $heeftExterneSrc  = preg_match('/\bsrc\s*=\s*["\']https?:\/\//i', $iframeTag);
+            if ($heeftDisplayNone && $heeftExterneSrc) {
+                $reden = 'Verborgen iframe (display:none) met externe src - bekende techniek voor onzichtbare doorverwijzing/drive-by-injectie, VERDACHT';
+                $verdacht = true;
+                break;
+            }
+        }
+    }
+
+    // PATROON 21: Bekende webshell-naambanners. Deze specifieke, herkenbare
+    // strings komen voor in nog steeds actief gebruikte, publiek
+    // beschikbare webshell-families - dreigingsonderzoek (Recorded Future,
+    // 2026) noemt WSO- en b374k-varianten nog altijd als de meest genoemde
+    // open-source webshells. Vangt specifiek de kant-en-klare, ONGEWIJZIGDE
+    // variant; een aanvaller die de banner zelf aanpast/obfusceert (heel
+    // gangbaar, precies om dit soort signature-checks te ontlopen) wordt
+    // hier niet door gevangen - dat is waar de gedrag-gebaseerde patronen
+    // hierboven voor dienen. Bewust GEEN generieke/regionale namen
+    // (Cyber Shell, Ninja Shell, IndoXploit e.d.) - daar is geen betrouwbare
+    // aanwijzing voor dat die nog actueel voorkomen.
+    //
+    // LET OP (ontdekt augustus 2026, com_kunena op bmwcruiser.nl): een
+    // kale substring-match (stripos) op "FilesMan" sloeg ook aan op
+    // legitieme identifiers die toevallig met die letters beginnen, zoals
+    // een klasse/helper genaamd "FilesManager" - heel aannemelijk in
+    // bestanden die specifiek over bijlagebeheer gaan (UserItem.php,
+    // UserAttachmentsDisplay.php). Daarom nu een woordgrens (\b) aan beide
+    // kanten van elke banner, zodat "FilesMan" alleen als op zichzelf
+    // staand woord telt, niet als voorvoegsel van een langer, onschuldig
+    // woord.
+    if (!$verdacht) {
+        $webshellBanners = ['WSO 2.', 'wso_version', 'c99shell', 'c99madshell', 'r57shell', 'FilesMan', 'b374k'];
+        foreach ($webshellBanners as $banner) {
+            if (preg_match('/\b' . preg_quote($banner, '/') . '\b/i', $inhoud)) {
+                $reden = "Bekende webshell-naambanner (\"{$banner}\") aangetroffen - BACKDOOR PATROON (kant-en-klare, ongewijzigde webshell)";
+                $verdacht = true;
+                break;
+            }
+        }
+    }
+
+    // PATROON 22: Cryptominer-signalen. Protocol-/toolnamen die specifiek
+    // bij server-side cryptomining horen, ongeacht welke concrete pool
+    // erachter zit - bewust GEEN dienstnaam zoals "Coinhive" (die dienst
+    // bestaat sinds 2019 niet meer en zou dus hooguit een oude, allang
+    // dode infectie kunnen raken, nooit een nieuwe).
+    if (!$verdacht) {
+        $minerStrings = ['xmrig', 'stratum+tcp://', 'cryptonight', 'crypto-loot', 'webminerpool'];
+        foreach ($minerStrings as $signaal) {
+            if (stripos($inhoud, $signaal) !== false) {
+                $reden = "Cryptominer-signaal (\"{$signaal}\") aangetroffen - BACKDOOR PATROON (server-side cryptomining)";
+                $verdacht = true;
+                break;
+            }
+        }
+    }
+
     if ($verdacht) {
         $vondsten[] = [
             'naam' => str_replace(__DIR__, '', $bestandpad),
@@ -2156,6 +2283,14 @@ function isBekendeLegitiemeLibrary(string $volledigPad, string $startMap): bool
         // create_function() als callback-mechanisme - door Wouter zelf
         // gecontroleerd en bevestigd als legitiem (augustus 2026).
         '#/libraries/regularlabs/helpers/assignments/php\.php$#i',
+        // Smarty's ingebouwde {mailto}-functie (meegeleverd als Composer-
+        // dependency door extensies die Smarty als template-engine
+        // gebruiken, bv. com_eventgallery) gebruikt bewust
+        // document.write(unescape(...)) om e-mailadressen te verbergen
+        // voor spam-harvesters - een bekende, legitieme anti-spamtechniek,
+        // geen JS-injectie. Triggerde PATROON 20 (bmwcruiser.nl, augustus
+        // 2026).
+        '#/vendor/smarty/smarty/src/FunctionHandler/Mailto\.php$#i',
     ];
 
     foreach ($bekendePatronen as $patroon) {

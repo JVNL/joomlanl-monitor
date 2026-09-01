@@ -785,6 +785,7 @@ function groepeerOpHerkomst(array $extensies): array
                 'auteur'           => $extensie['auteur'] ?? null,
                 'enabled'          => false,
                 'status'           => null,
+                'status_bron'      => null,
                 'aantal_onderdelen' => 0,
                 'heeft_component'  => false,
                 'representatief_prioriteit' => 99,
@@ -846,17 +847,26 @@ function groepeerOpHerkomst(array $extensies): array
             // de getoonde status, in plaats van de gebruikelijke "slechtste
             // status wint"-regel die de rest van dit systeem gebruikt.
             if ($groep['gebruik_representatief_status']) {
-                $groep['status'] = $extensie['status'] ?? null;
+                $groep['status_bron'] = maakStatusBron(
+                    $extensie['status'] ?? null,
+                    $extensie['versie'] ?? null,
+                    $extensie['nieuwste_versie'] ?? null,
+                    $extensie['naam'] ?? null
+                );
+                $groep['status'] = $groep['status_bron']['status'];
             }
         }
 
         $groep['nieuwste_versie'] = kiesHoogsteNieuwsteVersie($groep['nieuwste_versie'], $extensie['nieuwste_versie'] ?? null);
 
-        $volgorde = fn($s) => $s === false ? 0 : ($s === true ? 1 : 2);
-        if (!$groep['gebruik_representatief_status']
-            && ($groep['status'] === null || $volgorde($extensie['status'] ?? null) < $volgorde($groep['status']))
-        ) {
-            $groep['status'] = $extensie['status'] ?? null;
+        if (!$groep['gebruik_representatief_status']) {
+            $groep['status_bron'] = combineerStatus($groep['status_bron'], maakStatusBron(
+                $extensie['status'] ?? null,
+                $extensie['versie'] ?? null,
+                $extensie['nieuwste_versie'] ?? null,
+                $extensie['naam'] ?? null
+            ));
+            $groep['status'] = $groep['status_bron']['status'] ?? null;
         }
         unset($groep);
     }
@@ -878,9 +888,24 @@ function groepeerOpHerkomst(array $extensies): array
             $naam = $groep['representatief_naam'] !== '' ? $groep['representatief_naam'] : $groep['namen'][0];
         }
 
-        // Versie: die van het representatieve onderdeel (component > package
-        // > eerst-tegengekomen), zodat dit consistent is met de sleutel.
+        // Versie: normaal die van het representatieve onderdeel (component >
+        // package > eerst-tegengekomen), zodat dit consistent is met de
+        // sleutel. UITZONDERING: als de status "niet up-to-date" is en dat
+        // door een ANDER onderdeel in de groep komt (status_bron), tonen we
+        // het versiepaar van dát onderdeel - anders zou je bijv. "6.0.3 →
+        // 6.0.3, Niet up-to-date" kunnen zien terwijl een niet-getoond
+        // tweede onderdeel (met een eigen, oudere versie) de echte reden is.
         $versie = $groep['representatief_versie'];
+        $nieuwsteVersieWeergave = $groep['nieuwste_versie'];
+        $statusOnderdeelNaam = null;
+
+        if ($groep['status'] === false && $groep['status_bron'] !== null) {
+            $versie = $groep['status_bron']['versie'] ?? $versie;
+            $nieuwsteVersieWeergave = $groep['status_bron']['nieuwste_versie'] ?? $nieuwsteVersieWeergave;
+            if (($groep['status_bron']['naam'] ?? null) !== null && $groep['status_bron']['naam'] !== $naam) {
+                $statusOnderdeelNaam = $groep['status_bron']['naam'];
+            }
+        }
 
         $unieketypes = array_unique($groep['types']);
         $typeTekst = count($unieketypes) === 1
@@ -891,10 +916,12 @@ function groepeerOpHerkomst(array $extensies): array
             'naam'             => $naam,
             'type'             => $typeTekst,
             'versie'           => $versie,
-            'nieuwste_versie'  => $groep['nieuwste_versie'],
+            'nieuwste_versie'  => $nieuwsteVersieWeergave,
             'auteur'           => $groep['auteur'],
             'enabled'          => $groep['enabled'],
             'status'           => $groep['status'],
+            'status_bron'      => $groep['status_bron'],
+            'status_onderdeel_naam' => $statusOnderdeelNaam,
             'aantal_onderdelen' => $groep['aantal_onderdelen'],
             'representatief_type'    => $groep['representatief_type'],
             'representatief_element' => $groep['representatief_element'],
@@ -961,23 +988,85 @@ function kiesHoogsteNieuwsteVersie(?string $a, ?string $b): ?string
     return $a ?? $b;
 }
 
+/**
+ * Combineert twee "status-bronnen" tot één: elk is null (nog niets bekend)
+ * of een array ['status'=>.., 'versie'=>.., 'nieuwste_versie'=>.., 'naam'=>..]
+ * die aangeeft welke status een SPECIFIEK onderdeel had, en met welk
+ * versienummer/naam die status hoort. Geeft de "slechtste" van de twee
+ * terug (false < null < true), inclusief het bijbehorende versiepaar.
+ *
+ * Bestaat om te voorkomen dat een gegroepeerd product een status toont
+ * die van een ander onderdeel komt dan het getoonde versienummer (bijv.
+ * "Niet up-to-date" naast een versie/nieuwste-versie die juist al gelijk
+ * zijn, omdat een ander, niet-getoond onderdeel in dezelfde groep nog
+ * verouderd is). Wordt gebruikt in groepeerOpHerkomst(),
+ * combineerGegroepeerdeProducten() en clusterOpAuteurEnVersie(), zodat dit
+ * op alle plekken waar statussen van meerdere onderdelen samenkomen op
+ * dezelfde manier werkt - in plaats van per geval een nieuwe handmatige
+ * uitzondering toe te voegen.
+ */
+function combineerStatus(?array $a, ?array $b): ?array
+{
+    if ($a === null) {
+        return $b;
+    }
+    if ($b === null) {
+        return $a;
+    }
+
+    $volgorde = fn($s) => $s === false ? 0 : ($s === true ? 1 : 2);
+
+    return $volgorde($a['status']) <= $volgorde($b['status']) ? $a : $b;
+}
+
+/**
+ * Bouwt een status-bron-array (zie combineerStatus()) op basis van een
+ * ruwe extensie- of groep-rij.
+ */
+function maakStatusBron(?bool $status, ?string $versie, ?string $nieuwsteVersie, ?string $naam): array
+{
+    return [
+        'status'          => $status,
+        'versie'          => $versie,
+        'nieuwste_versie' => $nieuwsteVersie,
+        'naam'            => $naam,
+    ];
+}
+
 function combineerGegroepeerdeProducten(array $a, array $b): array
 {
     $heeftComponentA = ($a['representatief_type'] ?? '') === 'component';
     $primair   = $heeftComponentA ? $a : $b;
     $secundair = $heeftComponentA ? $b : $a;
 
-    $volgorde = fn($s) => $s === false ? 0 : ($s === true ? 1 : 2);
-    $status = $volgorde($a['status']) <= $volgorde($b['status']) ? $a['status'] : $b['status'];
+    $statusBron = combineerStatus($a['status_bron'] ?? null, $b['status_bron'] ?? null);
+    $status = $statusBron['status'] ?? null;
+
+    // Zelfde redenering als in groepeerOpHerkomst(): bij status false tonen
+    // we het versiepaar van het onderdeel dat die status veroorzaakt, niet
+    // zomaar dat van het primaire (component-)onderdeel.
+    $versie = $primair['versie'];
+    $nieuwsteVersie = kiesHoogsteNieuwsteVersie($a['nieuwste_versie'] ?? null, $b['nieuwste_versie'] ?? null);
+    $statusOnderdeelNaam = null;
+
+    if ($status === false && $statusBron !== null) {
+        $versie = $statusBron['versie'] ?? $versie;
+        $nieuwsteVersie = $statusBron['nieuwste_versie'] ?? $nieuwsteVersie;
+        if (($statusBron['naam'] ?? null) !== null && $statusBron['naam'] !== $primair['naam']) {
+            $statusOnderdeelNaam = $statusBron['naam'];
+        }
+    }
 
     return [
         'naam'             => $primair['naam'],
         'type'             => $a['type'] === $b['type'] ? $a['type'] : trim($a['type'] . ', ' . $b['type'], ', '),
-        'versie'           => $primair['versie'],
-        'nieuwste_versie'  => kiesHoogsteNieuwsteVersie($a['nieuwste_versie'] ?? null, $b['nieuwste_versie'] ?? null),
+        'versie'           => $versie,
+        'nieuwste_versie'  => $nieuwsteVersie,
         'auteur'           => $primair['auteur'],
         'enabled'          => $a['enabled'] || $b['enabled'],
         'status'           => $status,
+        'status_bron'      => $statusBron,
+        'status_onderdeel_naam' => $statusOnderdeelNaam,
         'aantal_onderdelen' => $a['aantal_onderdelen'] + $b['aantal_onderdelen'],
         'representatief_type'    => $primair['representatief_type'],
         'representatief_element' => $primair['representatief_element'],
@@ -1074,30 +1163,51 @@ function clusterOpAuteurEnVersie(array $groepen): array
         $representatief = $cluster[0];
 
         $types   = [];
-        $status  = null;
         $nieuwsteVersie = null;
         $enabled = false;
         $alleSleutels = [];
-        $volgorde = fn($s) => $s === false ? 0 : ($s === true ? 1 : 2);
+        $statusBron = null;
 
         foreach ($cluster as $item) {
             $types[] = $item['type'];
             $enabled = $enabled || !empty($item['enabled']);
             $nieuwsteVersie = kiesHoogsteNieuwsteVersie($nieuwsteVersie, $item['nieuwste_versie'] ?? null);
-            if ($status === null || $volgorde($item['status']) < $volgorde($status)) {
-                $status = $item['status'];
-            }
+            $itemStatusBron = $item['status_bron'] ?? maakStatusBron(
+                $item['status'] ?? null,
+                $item['versie'] ?? null,
+                $item['nieuwste_versie'] ?? null,
+                $item['naam'] ?? null
+            );
+            $statusBron = combineerStatus($statusBron, $itemStatusBron);
             $alleSleutels = array_merge($alleSleutels, $item['sleutels'] ?? []);
+        }
+
+        $status = $statusBron['status'] ?? null;
+
+        // Zelfde redenering als in groepeerOpHerkomst(): bij status false
+        // tonen we het versiepaar van het onderdeel dat die status
+        // veroorzaakt, niet zomaar dat van het representatieve (kortste-
+        // naam) onderdeel.
+        $versie = $representatief['versie'];
+        $statusOnderdeelNaam = null;
+        if ($status === false && $statusBron !== null) {
+            $versie = $statusBron['versie'] ?? $versie;
+            $nieuwsteVersie = $statusBron['nieuwste_versie'] ?? $nieuwsteVersie;
+            if (($statusBron['naam'] ?? null) !== null && $statusBron['naam'] !== $representatief['naam']) {
+                $statusOnderdeelNaam = $statusBron['naam'];
+            }
         }
 
         $overig[] = [
             'naam'             => $representatief['naam'] . ' (+ ' . (count($cluster) - 1) . ' gerelateerde onderdelen)',
             'type'             => implode(', ', array_unique($types)),
-            'versie'           => $representatief['versie'],
+            'versie'           => $versie,
             'nieuwste_versie'  => $nieuwsteVersie,
             'auteur'           => $representatief['auteur'],
             'enabled'          => $enabled,
             'status'           => $status,
+            'status_bron'      => $statusBron,
+            'status_onderdeel_naam' => $statusOnderdeelNaam,
             'aantal_onderdelen' => array_sum(array_column($cluster, 'aantal_onderdelen')),
             'representatief_type'    => $representatief['representatief_type'] ?? '',
             'representatief_element' => $representatief['representatief_element'] ?? '',

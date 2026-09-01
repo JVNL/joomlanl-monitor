@@ -200,12 +200,41 @@ $geselecteerdeSiteId = isset($_GET['site_id']) ? (int) $_GET['site_id'] : 0;
 $githubTokenIngesteld = catalogusGithubInstellingen($pdo)['token'] !== '';
 
 $sleutelsOpGeselecteerdeSite = null; // null = geen filter (alle sites)
+$nieuwsteVersieAlBekendOpDezeSite = []; // sleutel => true als déze site al een automatische versie heeft
 if ($geselecteerdeSiteId > 0) {
     $sleutelsOpGeselecteerdeSite = [];
-    $stmt = $pdo->prepare("SELECT DISTINCT type, element FROM site_alle_extensies WHERE site_id = ?");
+    // Let op: hier BEWUST dezelfde drie uitsluitingsfuncties toepassen als
+    // het echte extensieoverzicht (haalDerdePartijExtensies() in
+    // versie_vergelijk_functies.php) - anders komt een pakketonderdeel dat
+    // op DEZE site keurig aan zijn package_id gekoppeld is (en dus nooit
+    // los een eigen feed nodig heeft) toch in deze "zonder feed"-lijst
+    // terecht, puur omdat dezelfde sleutel elders in extensie_catalogus
+    // staat (die tabel is gedeeld over alle sites - zie ontvang_scan.php).
+    // Zonder deze filter leek het bijv. of "com_jce" en losse AcyMailing-
+    // subplugins hier hun eigen feed nodig hadden, terwijl ze op
+    // joomlanl.nl gewoon al correct bij hun package horen en nooit los
+    // getoond worden.
+    $stmt = $pdo->prepare("
+        SELECT type, element, folder, naam, auteur, package_id, enabled, nieuwste_versie
+        FROM site_alle_extensies
+        WHERE site_id = ?
+    ");
     $stmt->execute([$geselecteerdeSiteId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rij) {
-        $sleutelsOpGeselecteerdeSite[maakExtensieSleutel($rij['type'] ?? '', $rij['element'] ?? '')] = true;
+        if (isJoomlaKernExtensie($rij) || isOnderdeelVanPakket($rij) || isUitgeslotenVanExtensieoverzicht($rij)) {
+            continue;
+        }
+        $sleutel = maakExtensieSleutel($rij['type'] ?? '', $rij['element'] ?? '');
+        $sleutelsOpGeselecteerdeSite[$sleutel] = true;
+
+        // Sommige gedeelde catalogus-sleutels blijven bewust bestaan omdat
+        // een ANDERE site ze nog nodig heeft (zie de opschoonlogica in
+        // ontvang_scan.php) - voor déze site is de sleutel dan feitelijk
+        // al opgelost. Zonder deze markering lijkt zo'n rij hier identiek
+        // aan een sleutel die echt nog een feed-URL nodig heeft.
+        if (!empty($rij['nieuwste_versie'])) {
+            $nieuwsteVersieAlBekendOpDezeSite[$sleutel] = true;
+        }
     }
 }
 
@@ -793,6 +822,9 @@ input[type="url"] {
         <?php endif; ?>
         <?php if ($isGenegeerd): ?>
             <br><span class="badge-automatisch">genegeerd<?php echo $extensie['genegeerd_op'] ? ' op ' . htmlspecialchars(date('d-m-Y H:i', strtotime($extensie['genegeerd_op']))) : ''; ?></span>
+        <?php endif; ?>
+        <?php if (!empty($nieuwsteVersieAlBekendOpDezeSite[$extensie['sleutel']])): ?>
+            <br><span class="badge-automatisch" title="Deze sleutel staat nog in de lijst omdat minstens één andere site 'm nog nodig heeft - zie de opschoonlogica in ontvang_scan.php.">al automatisch opgelost voor déze site (nog benodigd voor 1+ andere site(s))</span>
         <?php endif; ?>
     </td>
     <td data-label="Manifest-pad"><?php echo $extensie['manifest_pad'] ? htmlspecialchars($extensie['manifest_pad']) : '<em>geen</em>'; ?></td>

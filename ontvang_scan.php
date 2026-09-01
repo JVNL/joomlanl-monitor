@@ -369,17 +369,41 @@ if ($siteId) {
         // heeft.
         // ------------------------------------------------------------------
         $alleVersieStatusStmt = $pdo->query("
-            SELECT DISTINCT type, element, (nieuwste_versie IS NOT NULL AND nieuwste_versie != '') AS heeft_versie
+            SELECT type, element, folder, naam, auteur, package_id, enabled,
+                   (nieuwste_versie IS NOT NULL AND nieuwste_versie != '') AS heeft_versie
             FROM site_alle_extensies
         ");
 
         $sleutelsMetAutomatischeVersie = [];
         $sleutelsNogNodig             = [];
+        // NIEUW: houdt bij of een sleutel op MINSTENS één site ooit als los,
+        // zelfstandig product is gezien (dus niet kern/pakketonderdeel/
+        // uitgesloten daar). Zonder dit blijft een sleutel die OVERAL
+        // onderdeel van een pakket is (bijv. AcyMailing-subplugins die
+        // altijd via package_id aan pkg_acymailing hangen) voor altijd in
+        // de catalogus staan: zijn ruwe nieuwste_versie-kolom wordt nergens
+        // gevuld (dat gebeurt alleen via het package_id-vangnet in-memory
+        // bij het tonen van het overzicht, nooit teruggeschreven naar
+        // site_alle_extensies), dus hij voldeed nooit aan
+        // "heeft_versie" - en werd dus nooit als "overbodig" herkend,
+        // ondanks dat hij nergens ooit een eigen feed nodig heeft.
+        $sleutelsWelEensLosRelevant = [];
         foreach ($alleVersieStatusStmt->fetchAll(PDO::FETCH_ASSOC) as $rij) {
             $sleutel = maakExtensieSleutel($rij['type'] ?? '', $rij['element'] ?? '');
             if ($sleutel === '') {
                 continue;
             }
+
+            // Zelfde drie uitsluitingsfuncties als het echte overzicht: als
+            // deze rij hier kern, pakketonderdeel, of sowieso uitgesloten
+            // is, telt hij niet mee als "op deze site nog een losse
+            // catalogus-rij nodig".
+            if (isJoomlaKernExtensie($rij) || isOnderdeelVanPakket($rij) || isUitgeslotenVanExtensieoverzicht($rij)) {
+                continue;
+            }
+
+            $sleutelsWelEensLosRelevant[$sleutel] = true;
+
             if (!empty($rij['heeft_versie'])) {
                 $sleutelsMetAutomatischeVersie[$sleutel] = true;
             } else {
@@ -400,7 +424,19 @@ if ($siteId) {
         $verwijderOverbodigeRijStmt = $pdo->prepare("DELETE FROM extensie_catalogus WHERE sleutel = ? AND genegeerd = 0");
         $aantalOverbodigeRijenVerwijderd = 0;
         foreach ($catalogusZonderFeedStmt->fetchAll(PDO::FETCH_COLUMN) as $sleutel) {
-            if (isset($sleutelsMetAutomatischeVersie[$sleutel]) && !isset($sleutelsNogNodig[$sleutel])) {
+            // Twee onafhankelijke redenen om een sleutel zonder eigen feed
+            // op te ruimen:
+            //   1. de oorspronkelijke check: overal waar hij automatisch
+            //      een versie heeft, en nergens meer als "nog nodig" geldt;
+            //   2. NIEUW: hij is nergens (meer) een los, zelfstandig
+            //      product - overal kern/pakketonderdeel/uitgesloten, of
+            //      helemaal niet meer gedetecteerd. Zo'n sleutel zal nooit
+            //      een eigen feed nodig hebben, ongeacht zijn (nooit
+            //      gevulde) automatische-versie-status.
+            $heeftOveralAutomatischeVersie = isset($sleutelsMetAutomatischeVersie[$sleutel]) && !isset($sleutelsNogNodig[$sleutel]);
+            $nergensLosRelevant            = !isset($sleutelsWelEensLosRelevant[$sleutel]);
+
+            if ($heeftOveralAutomatischeVersie || $nergensLosRelevant) {
                 $verwijderOverbodigeRijStmt->execute([$sleutel]);
                 $aantalOverbodigeRijenVerwijderd += $verwijderOverbodigeRijStmt->rowCount();
             }

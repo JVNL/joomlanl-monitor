@@ -27,16 +27,26 @@ jobs:
       - name: Diff-zip bouwen
         if: steps.vorige.outputs.vorige != ''
         run: |
+          # Bestanden/mappen die nooit in de update-zip terecht mogen komen,
+          # ook al zijn ze wel gewijzigd tussen de twee tags.
+          UITSLUITEN='^\.github/'
+          # Extra regels toevoegen kan zo, bijv.:
+          # UITSLUITEN="${UITSLUITEN}|^CHANGELOG\.md$|^LEES_DIT_EERST\.txt$"
+
           mkdir -p /tmp/diffbestanden
-          git diff --name-only --diff-filter=ACMR "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" > /tmp/gewijzigd.txt
+          git diff --name-only --diff-filter=ACMR "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" \
+            | grep -Ev "$UITSLUITEN" > /tmp/gewijzigd.txt
           while IFS= read -r bestand; do
             mkdir -p "/tmp/diffbestanden/$(dirname "$bestand")"
             cp "$bestand" "/tmp/diffbestanden/$bestand"
           done < /tmp/gewijzigd.txt
-          git diff --name-only --diff-filter=D "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" > /tmp/verwijderd.txt
+
+          git diff --name-only --diff-filter=D "${{ steps.vorige.outputs.vorige }}" "${{ steps.vorige.outputs.huidige }}" \
+            | grep -Ev "$UITSLUITEN" > /tmp/verwijderd.txt
           if [ -s /tmp/verwijderd.txt ]; then
             cp /tmp/verwijderd.txt "/tmp/diffbestanden/VERWIJDERDE_BESTANDEN.txt"
           fi
+
           cd /tmp/diffbestanden && zip -r "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" .
 
       - name: Diff-zip uploaden naar de release

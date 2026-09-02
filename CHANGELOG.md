@@ -5,6 +5,12 @@
 - `mod_kunenalatest` en `mod_kunenasearch` werden ten onrechte samengesmolten met het hoofdpakket `pkg_kunena` in `versie_vergelijk_functies.php`, waardoor ze nooit als eigen regel te zien waren in de "Volledige extensielijst (van derden)" - ook niet wanneer ze zelf een eigen, bekende versiestatus hadden
 - Er is nu een controle toegevoegd die vlak vóór het samenvoegen checkt of de kandidaat-module al een eigen bekende status heeft. Is dat zo, dan wordt de samenvoeging overgeslagen en blijft de module als losse regel staan, met zijn eigen correcte status - naast het hoofdpakket, zonder dat daar iets van wordt overschreven
 
+### Nieuw: extensiebestand-afwijkingen losgekoppeld van de Beveiliging-kolom
+- De Beveiliging-kolom vermengde twee heel verschillende soorten signalen: bevestigde dreigingen (backdoor-scan, kernbestand-afwijkingen t.o.v. het officiële Joomla-pakket) en het zachtere "dit bestand wijkt af van de meerderheid van andere sites" (kan net zo goed een andere editie/build zijn). Hierdoor kon een groot deel van de sites als "aandacht nodig" gemarkeerd staan, wat een vertekend beeld gaf
+- Extensiebestand-afwijkingen (t.o.v. andere sites) staan nu in een eigen, nieuwe kolom "Bestandsafwijkingen" (🗂️): een groen vinkje bij nul afwijkingen, anders een oranje ⚠️ met aantal - bewust oranje in plaats van rood, om dit visueel te onderscheiden van een bevestigde dreiging in de Beveiliging-kolom. Sorteerbaar, ook op mobiel (met een eigen label in de kaartweergave)
+- Kernbestand-afwijkingen t.o.v. het officiële Joomla-pakket blijven bewust wél in de Beveiliging-kolom staan - dat is een vergelijking met iets officieels, dus een hard signaal, net als de reguliere verdachte-bestanden-scan
+- Nieuwe, aparte teller bovenin ("Bestandsafwijkingen", oranje), los van "Aandacht nodig - beveiliging" - die laatste telt nu realistischer, omdat de zachtere signalen er niet meer in meetellen
+
 ## 1.20 - 2026-09-01
 
 ### Nieuw: preciezere status bij gegroepeerde extensies met meerdere onderdelen

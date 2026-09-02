@@ -121,6 +121,21 @@ $kernAfwijkingenPerSite = $pdo->query("
 $kernVertrouwdPerSite = $pdo->query("SELECT site_id, COUNT(*) AS aantal FROM kern_vertrouwd GROUP BY site_id")
     ->fetchAll(PDO::FETCH_KEY_PAIR);
 
+// Aantal extensie-bestand-afwijkingen (vergeleken met andere sites, zie
+// vergelijk_extensie_bestanden.php) per site - net als bij de
+// kernbestand-afwijkingen hierboven, als losse lookup-array opgehaald.
+// Vertrouwde afwijkingen (extensie_bestand_vertrouwd) tellen hier niet mee,
+// exact dezelfde LEFT JOIN-opzet als bij kern_vertrouwd hierboven.
+$bestandAfwijkingenPerSite = $pdo->query("
+        SELECT b.site_id, COUNT(*) AS aantal
+        FROM extensie_bestand_afwijkingen b
+        LEFT JOIN extensie_bestand_vertrouwd v
+            ON v.site_id = b.site_id AND v.relatief_pad = b.relatief_pad AND v.hash = b.eigen_hash
+        WHERE v.id IS NULL
+        GROUP BY b.site_id
+    ")
+    ->fetchAll(PDO::FETCH_KEY_PAIR);
+
 $laatsteVerdachtScan = null;
 foreach ($sites as $site) {
     if (!empty($site['verdacht_laatste_scan'])) {
@@ -851,7 +866,9 @@ foreach ($sites as $siteVoorTelling) {
             $vertrouwdAantalVoorTelling++;
         }
     }
-    $issueBeveiliging = (count($itemsVoorTelling) - $vertrouwdAantalVoorTelling) > 0;
+    $issueBeveiliging = (count($itemsVoorTelling) - $vertrouwdAantalVoorTelling) > 0
+        || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0
+        || (int) ($bestandAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0;
 
     // Extensies: uitsluitend gebaseerd op de volledige scan (site_alle_extensies
     // via $alleDerdePartijSamenvatting) - het oudere, aparte mechanisme
@@ -959,7 +976,11 @@ foreach ($sites as $site) {
         // de kolom - los van de reguliere verdachte-bestanden-regel(s)
         // hieronder, zodat meteen duidelijk is om welk type vondst het gaat.
         $kernAantal = (int) ($kernAfwijkingenPerSite[$site['id']] ?? 0);
-        $ernstBeveiliging = $verdachtWeergave + $kernAantal;
+        // Extensie-bestand-afwijkingen (vergeleken met andere sites) tellen
+        // sinds kort ook mee - stonden voorheen nergens op deze pagina,
+        // ondanks dat het beveiligingsrapport ze wel toonde.
+        $bestandAantal = (int) ($bestandAfwijkingenPerSite[$site['id']] ?? 0);
+        $ernstBeveiliging = $verdachtWeergave + $kernAantal + $bestandAantal;
 
         $regels = [];
 
@@ -978,6 +999,11 @@ foreach ($sites as $site) {
         if ($kernAantal > 0) {
             $kernWoord = $kernAantal === 1 ? 'kernbestand wijkt af' : 'kernbestanden wijken af';
             $regels[] = "<a class='rood' href='beveiliging.php?id=$siteId'>⚠️ $kernAantal $kernWoord van officieel pakket</a>";
+        }
+
+        if ($bestandAantal > 0) {
+            $bestandWoord = $bestandAantal === 1 ? 'extensiebestand wijkt af' : 'extensiebestanden wijken af';
+            $regels[] = "<a class='rood' href='beveiliging.php?id=$siteId'>⚠️ $bestandAantal $bestandWoord van andere sites</a>";
         }
 
         $kernVertrouwdAantal = (int) ($kernVertrouwdPerSite[$site['id']] ?? 0);

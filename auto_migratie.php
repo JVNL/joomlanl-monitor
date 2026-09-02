@@ -470,6 +470,45 @@ function haalMigraties(): array
             ");
         },
 
+        // ----------------------------------------------------------------
+        // Zelfde soort "vertrouwen"-mechanisme als kern_vertrouwd hierboven,
+        // maar dan voor extensie_bestand_afwijkingen (vergeleken met andere
+        // sites, niet met een officieel pakket) - stond eerder helemaal
+        // niet instelbaar, alleen te bekijken (augustus 2026).
+        // ----------------------------------------------------------------
+        17 => function (PDO $pdo) {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `extensie_bestand_vertrouwd` (
+                    `id` int(11) NOT NULL AUTO_INCREMENT,
+                    `site_id` int(11) NOT NULL,
+                    `groep_sleutel` varchar(190) NOT NULL,
+                    `relatief_pad` varchar(500) NOT NULL,
+                    `hash` char(64) NOT NULL,
+                    `toegevoegd_op` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `site_pad_hash` (`site_id`, `relatief_pad`(255), `hash`),
+                    KEY `site_id` (`site_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+        },
+
+        // ----------------------------------------------------------------
+        // Bij precies 2 sites die een bestand hebben, met 2 verschillende
+        // hashes, koos arsort() vroeger stilzwijgend de eerst-aangetroffen
+        // hash als "meerderheid" - puur toeval, geen echte meerderheid
+        // (1 van de 2 is nou eenmaal altijd "1 van de 2"). De UI-tekst
+        // ("deze site wijkt af") deed daardoor ten onrechte alsof de ANDERE
+        // site aantoonbaar de juiste was. Deze kolom onthoudt of er
+        // daadwerkelijk een duidelijke meerderheid was (zie
+        // vergelijk_extensie_bestanden.php), zodat beveiliging.php bij een
+        // echte gelijke stand een neutralere tekst kan tonen.
+        // ----------------------------------------------------------------
+        18 => function (PDO $pdo) {
+            if (!kolomBestaat($pdo, 'extensie_bestand_afwijkingen', 'eenduidige_meerderheid')) {
+                $pdo->exec("ALTER TABLE `extensie_bestand_afwijkingen` ADD COLUMN `eenduidige_meerderheid` TINYINT(1) NOT NULL DEFAULT 1 AFTER `aantal_sites_totaal`");
+            }
+        },
+
     ];
 }
 

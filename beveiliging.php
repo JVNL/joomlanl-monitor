@@ -49,6 +49,312 @@ $afwijkingenStmt = $pdo->prepare("
 $afwijkingenStmt->execute([$id]);
 $bestandAfwijkingen = $afwijkingenStmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Vertrouwde (handmatig als "geen probleem" beoordeelde) extensie-bestand-
+// afwijkingen van het actieve overzicht scheiden - zelfde soort onderscheid
+// als bij kern_vertrouwd hierboven/hieronder.
+$extensieVertrouwdStmt = $pdo->prepare("SELECT relatief_pad, hash FROM extensie_bestand_vertrouwd WHERE site_id = ?");
+$extensieVertrouwdStmt->execute([$id]);
+$extensieVertrouwdSleutels = [];
+foreach ($extensieVertrouwdStmt->fetchAll(PDO::FETCH_ASSOC) as $v) {
+    $extensieVertrouwdSleutels[$v['relatief_pad'] . '|' . $v['hash']] = true;
+}
+foreach ($bestandAfwijkingen as &$afwijkingRij) {
+    $afwijkingRij['is_vertrouwd'] = isset($extensieVertrouwdSleutels[$afwijkingRij['relatief_pad'] . '|' . $afwijkingRij['eigen_hash']]);
+}
+unset($afwijkingRij);
+
+// Voor elke afwijking concreet opzoeken WELKE andere site(s) dit bestand
+// ook hebben (gegroepeerd per hash, met domeinnaam) - zodat je niet
+// "vergelijk zelf via FTP met een andere site" hoeft te lezen zonder te
+// weten welke, maar direct kunt zien (en met één klik bekijken) bij welke
+// site de andere versie staat. Alleen mogelijk voor extensiebestanden
+// (extensie_bestand_hashes bewaart per site een hash per bestand) - niet
+// voor kernbestand-afwijkingen, die tegen het officiële pakket vergelijken.
+$anderesSitesStmt = $pdo->prepare("
+    SELECT h.site_id, h.hash, s.domein
+    FROM extensie_bestand_hashes h
+    INNER JOIN sites s ON s.id = h.site_id
+    WHERE h.groep_sleutel = ? AND h.relatief_pad = ? AND h.site_id != ?
+    ORDER BY s.domein
+");
+foreach ($bestandAfwijkingen as &$afwijkingRij) {
+    $anderesSitesStmt->execute([$afwijkingRij['groep_sleutel'], $afwijkingRij['relatief_pad'], $id]);
+    $perHash = [];
+    foreach ($anderesSitesStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $perHash[$r['hash']][] = $r;
+    }
+    // Andere sites met PRECIES dezelfde inhoud als hier (kan voorkomen bij
+    // een gelijke stand met 3+ varianten, of als deze afwijking eigenlijk
+    // een oude scan betreft).
+    $afwijkingRij['zelfde_versie_sites'] = $perHash[$afwijkingRij['eigen_hash']] ?? [];
+    unset($perHash[$afwijkingRij['eigen_hash']]);
+    // De rest: sites met een andere versie dan hier, gegroepeerd per hash.
+    $afwijkingRij['andere_versie_groepen'] = $perHash;
+}
+unset($afwijkingRij);
+
+$bestandAfwijkingenActief = array_values(array_filter($bestandAfwijkingen, fn($r) => !$r['is_vertrouwd']));
+$bestandAfwijkingenVertrouwd = array_values(array_filter($bestandAfwijkingen, fn($r) => $r['is_vertrouwd']));
+
+/**
+ * Rendert een compacte, klikbare lijst van sitedomeinen die (via
+ * beheerBekijk() met een afwijkend site_id) direct de inhoud van datzelfde
+ * bestand bij die andere site tonen - zodat je niet zelf via FTP hoeft te
+ * gaan zoeken welke site je moet checken. Bij veel sites in één groep
+ * wordt de lijst afgekapt, met een simpel getal erachter (geen losse link
+ * per site nodig als er toch al 15+ sites hetzelfde hebben).
+ */
+function renderAndereSitesLijst(array $sites, string $viewerIdPrefix, int $max = 5): string
+{
+    if (empty($sites)) {
+        return '<span style="color: var(--thema-uitleg-tekst);">(geen)</span>';
+    }
+    // Deze functie levert altijd links op voor het RECHTER paneel van het
+    // bijbehorende renderTweeVeldenViewer()-paar (id eindigend op "-b") -
+    // de aanroepers geven bewust alleen de prefix door (dezelfde prefix
+    // als bij renderTweeVeldenViewer()), niet de volledige id, om te
+    // voorkomen dat de twee ooit uit elkaar gaan lopen.
+    $viewerId = $viewerIdPrefix . '-b';
+    $links = [];
+    foreach (array_slice($sites, 0, $max) as $s) {
+        $domeinJs = htmlspecialchars(addslashes($s['domein']));
+        $links[] = '<a href="#" onclick="event.preventDefault(); beheerBekijk(this, \'' . $viewerId . '\', '
+            . (int) $s['site_id'] . ", '{$domeinJs}');\" style=\"white-space: nowrap;\">🔍 " . htmlspecialchars($s['domein']) . '</a>';
+    }
+    $html = implode(', ', $links);
+    $rest = count($sites) - $max;
+    if ($rest > 0) {
+        $html .= ' <span style="color: var(--thema-uitleg-tekst);">en ' . $rest . ' meer</span>';
+    }
+    return $html;
+}
+
+/**
+ * Groepeert per-bestand afwijkingen binnen dezelfde extensie+versie die
+ * een IDENTIEKE site-verdeling laten zien (dezelfde andere site(s) hebben
+ * hier exact dezelfde inhoud als déze site) tot één samengevoegde rij, in
+ * plaats van elk bestand apart te tonen.
+ *
+ * Reden: als een hele extensie in bulk van de "meerderheidsversie"
+ * afwijkt (bijv. een andere sub-editie/build met toevallig hetzelfde
+ * versienummer), levert dat tientallen losse rijen op met steeds
+ * dezelfde site-groepering - dat verdrinkt de werkelijk interessante
+ * uitzondering: een los bestand met een AFWIJKENDE site-groepering
+ * t.o.v. de rest van dezelfde extensie, wat wél op een individuele
+ * aanpassing (bijv. een backdoor) kan wijzen. Zo'n uitzondering krijgt
+ * hierdoor automatisch een eigen signatuur en blijft dus gewoon los
+ * zichtbaar, terwijl de bulk wordt samengevoegd.
+ *
+ * Bewust gebaseerd op de feitelijke site-verdeling (structureel), niet op
+ * bestandsnaam/-pad (signatuur) - zelfde soort redenering als de
+ * behavior-based aanpak in scan_template.php.
+ *
+ * @param array $afwijkingen Rijen met o.a. 'groep_sleutel' en 'zelfde_versie_sites'.
+ * @param int $drempel Minimum aantal bestanden met dezelfde site-verdeling
+ *                      om als "bulk" te worden samengevoegd i.p.v. los getoond.
+ * @return array ['los' => rijen zoals voorheen, 'clusters' => samengevoegde groepen]
+ */
+function groepeerBulkAfwijkingen(array $afwijkingen, int $drempel = 5): array
+{
+    $perSignatuur = [];
+    foreach ($afwijkingen as $afwijking) {
+        $domeinen = array_column($afwijking['zelfde_versie_sites'], 'domein');
+        sort($domeinen);
+        $signatuur = $afwijking['groep_sleutel'] . '||' . implode('|', $domeinen);
+
+        if (!isset($perSignatuur[$signatuur])) {
+            $perSignatuur[$signatuur] = [
+                'groep_sleutel' => $afwijking['groep_sleutel'],
+                'domeinen'      => $domeinen,
+                'items'         => [],
+            ];
+        }
+        $perSignatuur[$signatuur]['items'][] = $afwijking;
+    }
+
+    $los = [];
+    $clusters = [];
+    foreach ($perSignatuur as $groep) {
+        if (count($groep['items']) >= $drempel) {
+            $clusters[] = [
+                'groep_sleutel'   => $groep['groep_sleutel'],
+                'signatuur_label' => $groep['domeinen'] === []
+                    ? 'wijkt bij géén enkele andere site op dezelfde manier af'
+                    : 'zelfde inhoud als: ' . implode(', ', $groep['domeinen']),
+                'items'           => $groep['items'],
+            ];
+        } else {
+            foreach ($groep['items'] as $item) {
+                $los[] = $item;
+            }
+        }
+    }
+
+    return ['los' => $los, 'clusters' => $clusters];
+}
+
+/**
+ * Rendert één rij van de "afwijkende bestanden"-tabel. Geëxtraheerd uit de
+ * eerdere inline foreach-lussen zodat dezelfde rij-opmaak zowel los in de
+ * hoofdtabel als genest in een samengevoegde bulk-cluster (zie
+ * groepeerBulkAfwijkingen()) gebruikt kan worden, zonder duplicatie.
+ */
+function renderAfwijkingRij(array $afwijking, string $viewerIdPrefix, bool $isVertrouwd): string
+{
+    $sleutelWeergave = $afwijking['groep_sleutel'];
+    if (preg_match('/^kern_joomla_(\d+)_(\d+)_(\d+)$/', $sleutelWeergave, $m)) {
+        $sleutelWeergave = "Joomla-kern {$m[1]}.{$m[2]}.{$m[3]}";
+    }
+
+    ob_start();
+    ?>
+<tr<?php echo $isVertrouwd ? ' class="vertrouwd-rij"' : ''; ?> data-pad="<?php echo htmlspecialchars($afwijking['relatief_pad']); ?>">
+    <td data-label="Extensie + versie"><code><?php echo htmlspecialchars($sleutelWeergave); ?></code></td>
+    <td data-label="Bestand"><?php echo htmlspecialchars($afwijking['relatief_pad']); ?></td>
+    <td data-label="Verhouding">
+        <?php if ($afwijking['eenduidige_meerderheid']): ?>
+            deze site wijkt af<br>
+            <span style="color: var(--thema-uitleg-tekst); font-size: 11px;">
+                <?php echo (int) $afwijking['aantal_sites_meerderheid']; ?> van de <?php echo (int) $afwijking['aantal_sites_totaal']; ?> sites zijn gelijk
+            </span>
+        <?php else: ?>
+            geen duidelijke meerderheid<br>
+            <span style="color: var(--thema-uitleg-tekst); font-size: 11px;">
+                <?php echo (int) $afwijking['aantal_sites_totaal']; ?> sites zijn onderling verdeeld
+            </span>
+        <?php endif; ?>
+    </td>
+    <td data-label="Zelfde/andere versie bij" style="font-size: 12px;">
+        <div style="margin-bottom: 6px;">
+            <strong>Zelfde versie:</strong><br>
+            <?php echo renderAndereSitesLijst($afwijking['zelfde_versie_sites'], $viewerIdPrefix); ?>
+        </div>
+        <?php foreach ($afwijking['andere_versie_groepen'] as $hashGroep => $sitesInGroep): ?>
+        <div style="margin-bottom: 6px;">
+            <strong>Andere versie (<?php echo count($sitesInGroep); ?>x):</strong><br>
+            <?php echo renderAndereSitesLijst($sitesInGroep, $viewerIdPrefix); ?>
+        </div>
+        <?php endforeach; ?>
+    </td>
+    <td data-label="Actie">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+            <button
+                type="button"
+                class="btn-vertrouwen extensie-vertrouwen-knop"
+                style="padding: 5px 10px; font-size: 11px; border: none; border-radius: 3px; color: white; cursor: pointer;"
+                data-groep-sleutel="<?php echo htmlspecialchars($afwijking['groep_sleutel']); ?>"
+                data-hash="<?php echo htmlspecialchars($afwijking['eigen_hash']); ?>"
+                data-vertrouwd="<?php echo $isVertrouwd ? '1' : '0'; ?>"
+                onclick="wisselExtensieVertrouwen(this)"
+            ><?php echo $isVertrouwd ? '↩️ Niet meer vertrouwen' : '✅ Vertrouwen'; ?></button>
+            <button type="button" class="btn-bekijk" style="padding: 5px 10px; font-size: 11px; border: none; border-radius: 3px; color: white; cursor: pointer;" onclick="beheerBekijk(this, '<?php echo htmlspecialchars($viewerIdPrefix); ?>-a', SITE_ID, 'deze site')">👁️ Bekijk (deze site)</button>
+        </div>
+    </td>
+</tr>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * Rendert één samengevoegde bulk-cluster: een klapbare (<details>) regel
+ * met een korte samenvatting, en de losse bestanden erin (via
+ * renderAfwijkingRij()) - zo blijft alles alsnog controleerbaar, zonder
+ * dat de pagina standaard tientallen bijna-identieke rijen toont.
+ *
+ * Nog niet vertrouwde clusters (de "actieve" sectie) staan standaard
+ * OPEN: dat is nieuwe/openstaande informatie waar iemand die voor het
+ * eerst op deze pagina kijkt niet zou weten dat er een pijltje aan het
+ * begin van de regel staat om 'm uit te klappen, en dus zou kunnen
+ * missen dat er nog iets te doen is. Al-vertrouwde clusters (in de
+ * aparte "vertrouwd"-sectie onderaan) blijven dichtgeklapt - daar hoeft
+ * niets meer mee te gebeuren.
+ */
+function renderBulkClusterRij(array $cluster, string $viewerIdPrefix, bool $isVertrouwd): void
+{
+    $sleutelWeergave = $cluster['groep_sleutel'];
+    if (preg_match('/^kern_joomla_(\d+)_(\d+)_(\d+)$/', $sleutelWeergave, $m)) {
+        $sleutelWeergave = "Joomla-kern {$m[1]}.{$m[2]}.{$m[3]}";
+    }
+
+    // Compacte lijst van {pad, hash} voor de "vertrouw alle N"-knop
+    // hieronder - scheelt bij grote clusters het één-voor-één aanklikken
+    // van de losse Vertrouwen-knoppen in de tabel. Zie vertrouwCluster()
+    // (JavaScript, onderaan deze pagina) voor de verwerking.
+    $itemsVoorJs = array_map(
+        fn($item) => ['pad' => $item['relatief_pad'], 'hash' => $item['eigen_hash']],
+        $cluster['items']
+    );
+    $itemsJson = htmlspecialchars(json_encode($itemsVoorJs), ENT_QUOTES, 'UTF-8');
+    $aantal = count($cluster['items']);
+    ?>
+<tr>
+    <td colspan="5" style="padding: 0;">
+        <?php
+        // Alleen de nog NIET vertrouwde clusters standaard openklappen - dat
+        // is de nieuwe/openstaande informatie waar iemand actie op moet
+        // nemen. Al-vertrouwde clusters (in de aparte "vertrouwd"-sectie
+        // onderaan) blijven dichtgeklapt, want daar hoeft niets meer mee te
+        // gebeuren; die openklappen zou alleen maar ruis toevoegen.
+        ?>
+        <details style="padding: 10px 12px;"<?php echo $isVertrouwd ? '' : ' open'; ?>>
+            <summary style="cursor: pointer; padding: 4px 0;">
+                <code><?php echo htmlspecialchars($sleutelWeergave); ?></code> —
+                <strong><?php echo $aantal; ?> bestanden</strong> wijken op dezelfde manier af
+                (<?php echo htmlspecialchars($cluster['signatuur_label']); ?>)
+                <span style="color: var(--thema-uitleg-tekst); font-size: 11px;">
+                    — waarschijnlijk een andere sub-versie/build van deze extensie, geen los verdachte bestanden.
+                    Klik om de individuele bestanden te bekijken.
+                </span>
+            </summary>
+            <table class="responsive-tabel" style="margin-top: 10px;">
+                <tr>
+                    <th style="width: 20%;">Extensie + versie</th>
+                    <th style="width: 22%;">Bestand</th>
+                    <th style="width: 15%;">Verhouding</th>
+                    <th style="width: 23%;">Zelfde/andere versie bij</th>
+                    <th style="width: 150px;">
+                        Actie
+                        <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">
+                            <button
+                                type="button"
+                                class="btn-vertrouwen extensie-cluster-vertrouwen-knop"
+                                style="padding: 5px 10px; font-size: 11px; font-weight: normal; border: none; border-radius: 3px; color: white; cursor: pointer;"
+                                data-groep-sleutel="<?php echo htmlspecialchars($cluster['groep_sleutel']); ?>"
+                                data-items="<?php echo $itemsJson; ?>"
+                                data-actie="<?php echo $isVertrouwd ? 'ontvertrouw' : 'vertrouw'; ?>"
+                                onclick="vertrouwCluster(this)"
+                            ><?php echo $isVertrouwd
+                                ? '↩️ Niet meer vertrouwen (alle ' . $aantal . ')'
+                                : '✅ Vertrouw alle ' . $aantal; ?></button>
+                            <span class="cluster-vertrouwen-status" style="font-size: 11px; color: var(--thema-uitleg-tekst); font-weight: normal;"></span>
+                        </div>
+                    </th>
+                </tr>
+                <?php foreach ($cluster['items'] as $afwijking) {
+                    echo renderAfwijkingRij($afwijking, $viewerIdPrefix, $isVertrouwd);
+                } ?>
+            </table>
+        </details>
+    </td>
+</tr>
+    <?php
+}
+
+/**
+ * Twee viewer-panelen naast elkaar (op smalle schermen onder elkaar) - een
+ * links voor "deze site" en een rechts voor een aangeklikte andere site,
+ * zodat je ze ECHT naast elkaar kunt vergelijken in plaats van dat de ene
+ * de andere overschrijft. $idPrefix moet uniek zijn per tabel (actief vs.
+ * vertrouwd), anders raken de twee tabellen elkaars viewer kwijt.
+ */
+function renderTweeVeldenViewer(string $idPrefix): string
+{
+    return '<div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px;">'
+        . '<div style="flex: 1 1 320px; min-width: 280px;" id="' . $idPrefix . '-a"></div>'
+        . '<div style="flex: 1 1 320px; min-width: 280px;" id="' . $idPrefix . '-b"></div>'
+        . '</div>';
+}
+
 // Kernbestanden die afwijken van het OFFICIËLE, ongewijzigde Joomla-pakket
 // (zie kern_integriteit_functies.php / vergelijk_kern_bestanden.php) - een
 // aanvulling op de vergelijking hierboven, die alleen iets kan zeggen als
@@ -412,6 +718,12 @@ header .knop {
     color: #a5f3fc;
     border-radius: 6px;
     overflow: hidden;
+    /* Duidelijk, ook in donkere modus goed zichtbaar kader - anders is
+       niet meteen te zien waar deze weergave (met zijn eigen, altijd
+       donkere kleurenschema) bij hoort, zeker nu hij op meerdere plekken
+       op de pagina kan verschijnen. */
+    border: 2px solid var(--thema-link);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
 .viewer .kop {
@@ -584,13 +896,25 @@ if (!empty($site['super_users_json'])) {
 </div>
 <?php endif; ?>
 
-<div class="acties-boven" id="acties-boven-blok" style="<?php echo ($vertrouwdAantal > 0 || !empty($kernBestandAfwijkingenVertrouwd)) ? '' : 'display: none;'; ?>">
+<div class="acties-boven" id="acties-boven-blok" style="<?php echo ($vertrouwdAantal > 0 || !empty($kernBestandAfwijkingenVertrouwd) || !empty($bestandAfwijkingenVertrouwd)) ? '' : 'display: none;'; ?>">
     <?php if ($toonAlles): ?>
         <a class="knop secundair" href="beveiliging.php?id=<?php echo $id; ?>">Verberg vertrouwde items</a>
     <?php else: ?>
         <a class="knop secundair" href="beveiliging.php?id=<?php echo $id; ?>&toon_vertrouwd=1">Toon ook de vertrouwde items</a>
     <?php endif; ?>
 </div>
+
+<?php
+// Onvoorwaardelijk (dus buiten de if/elseif/else hieronder) geplaatst: deze
+// viewer wordt niet alleen gebruikt door de "Bekijk"-knoppen in de
+// verdachte-items-tabel (die er soms niet is, bijv. als alles al vertrouwd
+// is), maar sinds kort ook door de "Bekijk"-knop in de "Afwijkende
+// bestanden"-tabel verderop - die staat er altijd, ongeacht of er
+// verdachte items te tonen zijn. Stond deze div eerder alleen in de
+// "else"-tak hieronder, dan gaf een klik op die laatste knop een JS-fout
+// ("viewer is null") zodra er geen nieuwe verdachte items waren.
+?>
+<div id="bekijk-viewer"></div>
 
 <?php if ($totaalAantal === 0): ?>
 
@@ -606,8 +930,6 @@ if (!empty($site['super_users_json'])) {
     </div>
 
 <?php else: ?>
-
-<div id="bekijk-viewer"></div>
 
 <?php if (count($aanwezigeTypen) > 1): ?>
 <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
@@ -701,41 +1023,84 @@ if (!empty($site['super_users_json'])) {
     <div id="beheer-lijst">⏳ Laden...</div>
 </div>
 
-<?php if (!empty($bestandAfwijkingen)): ?>
+<?php if (!empty($bestandAfwijkingenActief)): ?>
 <h2 style="margin-top: 35px;">🔍 Afwijkende bestanden (vergeleken met andere sites)</h2>
 <div class="subtitel" style="margin-bottom: 15px;">
     Deze bestanden horen bij een extensie + versie (of bij dezelfde Joomla-kernversie) die ook op andere
     gemonitorde sites voorkomt, maar wijken op déze site af van de inhoud die bij de meeste van die andere sites
-    is aangetroffen. Dat kan een teken zijn dat het bestand hier is aangepast (bijv. door een backdoor) - het kan
-    ook een onschuldige, handmatige aanpassing zijn die je zelf ooit hebt gedaan. Controleer het bestand
-    handmatig via FTP om zeker te zijn.
+    is aangetroffen.
+    <br><br>
+    Mogelijke verklaringen: het bestand is hier aangepast (bijv. door een backdoor), het is een onschuldige,
+    handmatige aanpassing die je zelf ooit hebt gedaan, of het is een bestand dat de extensie zelf bewust per site
+    uniek genereert (bijv. een geheime sleutel).
+    <br><br>
+    <strong>👁️ Bekijk (deze site)</strong> toont de huidige inhoud van het bestand op déze site, in het linker
+    paneel hieronder. Bij "Zelfde versie bij" / "Andere versie bij" in de tabel staan de andere site(s) die dit
+    bestand hebben, elk met een eigen 🔍-link - klik daarop om de inhoud van díe site ernaast in het rechter
+    paneel te laden, zodat je de twee écht naast elkaar kunt vergelijken zonder zelf via FTP te hoeven zoeken.
+    <br>
+    <strong>✅ Vertrouwen</strong> markeert een afwijking als onschuldig - telt dan niet meer mee als waarschuwing
+    (ook niet op de monitor-overzichtspagina), tenzij het bestand hier later opnieuw verandert.
+    <br><br>
+    Staat er <strong>"geen duidelijke meerderheid"</strong>? Dan zijn de sites met dit bestand onderling verdeeld
+    (bijv. 1 tegen 1, of 2 tegen 2) - er is dan geen versie die vaker voorkomt dan de andere(n), dus is het niet
+    per se déze site die de afwijkende/foute is. Gebruik de 🔍-links om de andere versie(s) te bekijken en zelf te
+    bepalen welke correct is.
+    <br><br>
+    Wijken van dezelfde extensie veel bestanden tegelijk op precies dezelfde manier af? Dan worden die
+    samengevoegd tot één rij (bijv. "12 bestanden wijken op dezelfde manier af", standaard al uitgeklapt) - dat
+    wijst meestal op een andere sub-versie/build van die extensie, niet op losse verdachte bestanden. Gebruik de
+    knop <strong>"Vertrouw alle N bestanden"</strong> bovenaan die rij om ze in één keer allemaal te vertrouwen,
+    in plaats van elk bestand los aan te klikken - klap de rij daarna dicht met het pijltje ervoor als je 'm niet
+    meer nodig hebt. Een los bestand dat NIET in zo'n samengevoegde rij zit, wijkt op een eigen, afwijkende manier
+    af binnen diezelfde extensie - dat verdient extra aandacht.
 </div>
 <table class="responsive-tabel">
 <tr>
-    <th style="width: 25%;">Extensie + versie</th>
-    <th>Bestand</th>
-    <th style="width: 20%;">Verhouding</th>
+    <th style="width: 20%;">Extensie + versie</th>
+    <th style="width: 22%;">Bestand</th>
+    <th style="width: 15%;">Verhouding</th>
+    <th style="width: 23%;">Zelfde/andere versie bij</th>
+    <th style="width: 150px;">Actie</th>
 </tr>
-<?php foreach ($bestandAfwijkingen as $afwijking):
-    // De speciale "kern_joomla_X_Y_Z"-groepsleutel (zie scan_template.php)
-    // leesbaarder tonen als "Joomla-kern X.Y.Z" i.p.v. de ruwe technische vorm.
-    $sleutelWeergave = $afwijking['groep_sleutel'];
-    if (preg_match('/^kern_joomla_(\d+)_(\d+)_(\d+)$/', $sleutelWeergave, $m)) {
-        $sleutelWeergave = "Joomla-kern {$m[1]}.{$m[2]}.{$m[3]}";
-    }
+<?php
+$gegroepeerdActief = groepeerBulkAfwijkingen($bestandAfwijkingenActief);
+foreach ($gegroepeerdActief['clusters'] as $cluster) {
+    renderBulkClusterRij($cluster, 'bekijk-viewer-afwijkingen-actief', false);
+}
+foreach ($gegroepeerdActief['los'] as $afwijking) {
+    echo renderAfwijkingRij($afwijking, 'bekijk-viewer-afwijkingen-actief', false);
+}
 ?>
-<tr>
-    <td data-label="Extensie + versie"><code><?php echo htmlspecialchars($sleutelWeergave); ?></code></td>
-    <td data-label="Bestand"><?php echo htmlspecialchars($afwijking['relatief_pad']); ?></td>
-    <td data-label="Verhouding">
-        deze site wijkt af<br>
-        <span style="color: var(--thema-uitleg-tekst); font-size: 11px;">
-            <?php echo (int) $afwijking['aantal_sites_meerderheid']; ?> van de <?php echo (int) $afwijking['aantal_sites_totaal']; ?> sites zijn gelijk
-        </span>
-    </td>
-</tr>
-<?php endforeach; ?>
 </table>
+<?php echo renderTweeVeldenViewer('bekijk-viewer-afwijkingen-actief'); ?>
+<?php endif; ?>
+
+<?php if ($toonAlles && !empty($bestandAfwijkingenVertrouwd)): ?>
+<h2 style="margin-top: 35px;">🔍✅ Afwijkende bestanden - vertrouwd</h2>
+<div class="subtitel" style="margin-bottom: 15px;">
+    Deze afwijkingen zijn eerder handmatig bekeken en als vertrouwd gemarkeerd - ze tellen niet meer mee als
+    waarschuwing (ook niet op de monitor-overzichtspagina), maar blijven hier zichtbaar.
+</div>
+<table class="responsive-tabel">
+<tr>
+    <th style="width: 20%;">Extensie + versie</th>
+    <th style="width: 22%;">Bestand</th>
+    <th style="width: 15%;">Verhouding</th>
+    <th style="width: 23%;">Zelfde/andere versie bij</th>
+    <th style="width: 150px;">Actie</th>
+</tr>
+<?php
+$gegroepeerdVertrouwd = groepeerBulkAfwijkingen($bestandAfwijkingenVertrouwd);
+foreach ($gegroepeerdVertrouwd['clusters'] as $cluster) {
+    renderBulkClusterRij($cluster, 'bekijk-viewer-afwijkingen-vertrouwd', true);
+}
+foreach ($gegroepeerdVertrouwd['los'] as $afwijking) {
+    echo renderAfwijkingRij($afwijking, 'bekijk-viewer-afwijkingen-vertrouwd', true);
+}
+?>
+</table>
+<?php echo renderTweeVeldenViewer('bekijk-viewer-afwijkingen-vertrouwd'); ?>
 <?php endif; ?>
 
 <?php if (!empty($kernBestandAfwijkingenActief)): ?>
@@ -979,10 +1344,10 @@ function updateTellers() {
 // en de beheersectie (herstel/definitief verwijderen/prullenbak legen).
 // ------------------------------------------------------------------
 
-function beheerFetch(actie, extraVelden, knop) {
+function beheerFetch(actie, extraVelden, knop, siteId = SITE_ID) {
     const body = new URLSearchParams();
     body.append('csrf_token', CSRF_TOKEN);
-    body.append('site_id', SITE_ID);
+    body.append('site_id', siteId);
     body.append('actie', actie);
     for (const [k, v] of Object.entries(extraVelden)) {
         body.append(k, v);
@@ -1005,15 +1370,40 @@ function beheerFetch(actie, extraVelden, knop) {
         });
 }
 
-function beheerBekijk(knop) {
+// Houdt per panelenpaar (bijv. "bekijk-viewer-afwijkingen-actief") bij wat
+// er op dit moment in kant "a" en "b" geladen is - nodig om te weten
+// wanneer allebei een bestand hebben (dan pas heeft een regel-diff zin) en
+// om bij het wijzigen van één kant de vergelijking opnieuw te berekenen.
+const viewerParenInhoud = {};
+
+/**
+ * Rendert een array van {tekst, type}-regels (type: 'gelijk' of 'anders')
+ * als genummerde regels, in de stijl van Notepad++ - een smalle, grijze
+ * regelnummer-kolom links, zodat je bij het scrollen door twee naast
+ * elkaar staande bestanden in de buurt van hetzelfde regelnummer kunt
+ * blijven kijken om verschillen te vinden. Wordt gebruikt voor zowel de
+ * gewone (niet-vergeleken) weergave als de diff-gekleurde weergave.
+ */
+function renderGenummerdeRegels(regels) {
+    return regels.map((r, idx) => {
+        const achtergrond = r.type === 'anders' ? 'background: rgba(255, 99, 71, 0.35);' : '';
+        const tekst = escapeHtml(r.tekst);
+        return '<div style="display: flex; ' + achtergrond + '">'
+            + '<span style="flex: 0 0 44px; text-align: right; padding-right: 10px; margin-right: 8px; color: #64748b; border-right: 1px solid #334155; user-select: none;">' + (idx + 1) + '</span>'
+            + '<span style="flex: 1; white-space: pre-wrap; word-break: break-all;">' + (tekst === '' ? '&nbsp;' : tekst) + '</span>'
+            + '</div>';
+    }).join('');
+}
+
+function beheerBekijk(knop, viewerId = 'bekijk-viewer', siteId = SITE_ID, siteLabel = '') {
     const rij = knop.closest('tr');
     const pad = rij.dataset.pad;
-    const viewer = document.getElementById('bekijk-viewer');
+    const viewer = document.getElementById(viewerId);
 
     viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>⏳ Laden...</strong></div></div>';
     viewer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    beheerFetch('bekijk', { pad: pad }, knop).then(data => {
+    beheerFetch('bekijk', { pad: pad }, knop, siteId).then(data => {
         if (!data.succes) {
             viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>❌ ' + escapeHtml(data.foutmelding) + '</strong></div></div>';
             return;
@@ -1021,12 +1411,131 @@ function beheerBekijk(knop) {
         const metaTekst = data.type === 'bestand'
             ? (data.grootte.toLocaleString() + ' bytes' + (data.afgekapt ? ' (eerste 64 KB getoond)' : ''))
             : 'mapinhoud';
+        // Bij een andere site dan de huidige (siteId !== SITE_ID) er
+        // duidelijk bij vermelden BIJ WELKE site dit is opgehaald - anders
+        // is bij twee viewers na elkaar niet meer te zien welke van welke
+        // site was.
+        const bronTekst = siteLabel ? (' - ' + escapeHtml(siteLabel)) : (siteId != SITE_ID ? ' - andere site' : '');
+        const regelsVoorWeergave = data.type === 'bestand'
+            ? data.inhoud.split('\n').map(t => ({ tekst: t, type: 'gelijk' }))
+            : null;
         viewer.innerHTML = '<div class="viewer">'
-            + '<div class="kop"><strong>👁️ ' + escapeHtml(pad) + '</strong><span>' + metaTekst + '</span></div>'
-            + '<pre>' + escapeHtml(data.inhoud) + '</pre>'
+            + '<div class="kop"><strong>👁️ ' + escapeHtml(pad) + bronTekst + '</strong><span>' + metaTekst + '</span></div>'
+            + '<pre>' + (regelsVoorWeergave ? renderGenummerdeRegels(regelsVoorWeergave) : escapeHtml(data.inhoud)) + '</pre>'
             + '</div>';
+
+        // Bijhouden voor de naast-elkaar-vergelijking: alleen relevant voor
+        // de linker/rechter panelen van een vergelijkingspaar (id eindigt
+        // op "-a"/"-b"), niet voor de losse viewer bij de gewone
+        // verdachte-items-tabel bovenaan.
+        if (viewerId.endsWith('-a') || viewerId.endsWith('-b')) {
+            const paarPrefix = viewerId.slice(0, -2);
+            const kant = viewerId.slice(-1);
+            if (!viewerParenInhoud[paarPrefix]) {
+                viewerParenInhoud[paarPrefix] = {};
+            }
+            viewerParenInhoud[paarPrefix][kant] = { pad: pad, inhoud: data.inhoud, type: data.type };
+            pasRegelDiffToe(paarPrefix);
+        }
     }).catch(err => {
         viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>❌ Er ging iets mis: ' + escapeHtml(err.message) + '</strong></div></div>';
+    });
+}
+
+/**
+ * Eenvoudige, regel-gebaseerde diff via de klassieke LCS-aanpak (Longest
+ * Common Subsequence): geeft voor beide bestanden een array met per regel
+ * een type ('gelijk' of 'anders') terug. Wordt gebruikt om in de twee
+ * naast-elkaar-panelen de afwijkende regels een kleur te geven.
+ */
+function eenvoudigeRegelDiff(regelsA, regelsB) {
+    const n = regelsA.length;
+    const m = regelsB.length;
+
+    // Bij erg grote bestanden zou de volledige n×m-tabel te veel geheugen/
+    // tijd kosten voor een simpele klik-en-vergelijk-actie in de browser -
+    // dan liever geen diff-kleuring dan een vastlopende pagina.
+    if (n * m > 4000000) {
+        return null;
+    }
+
+    const dp = new Array(n + 1);
+    for (let i = 0; i <= n; i++) {
+        dp[i] = new Uint32Array(m + 1);
+    }
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = regelsA[i] === regelsB[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const uitA = [];
+    const uitB = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+        if (regelsA[i] === regelsB[j]) {
+            uitA.push({ tekst: regelsA[i], type: 'gelijk' });
+            uitB.push({ tekst: regelsB[j], type: 'gelijk' });
+            i++; j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            uitA.push({ tekst: regelsA[i], type: 'anders' });
+            i++;
+        } else {
+            uitB.push({ tekst: regelsB[j], type: 'anders' });
+            j++;
+        }
+    }
+    while (i < n) { uitA.push({ tekst: regelsA[i], type: 'anders' }); i++; }
+    while (j < m) { uitB.push({ tekst: regelsB[j], type: 'anders' }); j++; }
+
+    return { a: uitA, b: uitB };
+}
+
+/**
+ * Past, als beide kanten van een panelenpaar hetzelfde bestand (zelfde pad)
+ * geladen hebben, een regel-diff toe: afwijkende regels krijgen een
+ * gekleurde achtergrond in beide panelen. Wordt na elke geslaagde
+ * beheerBekijk()-lading opnieuw aangeroepen, dus werkt ook bij het
+ * doorwisselen naar een andere site in het rechterpaneel.
+ */
+function pasRegelDiffToe(paarPrefix) {
+    const paar = viewerParenInhoud[paarPrefix];
+    if (!paar || !paar.a || !paar.b) {
+        return; // nog niet allebei geladen
+    }
+    if (paar.a.type !== 'bestand' || paar.b.type !== 'bestand') {
+        return; // een van beide is een mapinhoud - regel-diff heeft dan geen zin
+    }
+    if (paar.a.pad !== paar.b.pad) {
+        return; // (kan gebeuren als de twee panelen toevallig bij verschillende rijen horen) - geen zinnige vergelijking dan
+    }
+
+    const diff = eenvoudigeRegelDiff(paar.a.inhoud.split('\n'), paar.b.inhoud.split('\n'));
+
+    [['a', diff ? diff.a : null], ['b', diff ? diff.b : null]].forEach(([kant, regels]) => {
+        const paneel = document.getElementById(paarPrefix + '-' + kant);
+        if (!paneel) {
+            return;
+        }
+        const pre = paneel.querySelector('.viewer pre');
+        const kop = paneel.querySelector('.viewer .kop');
+        if (!pre) {
+            return;
+        }
+        if (regels === null) {
+            // Te groot voor een diff - gewone (niet-gekleurde, wel al genummerde) weergave laten staan.
+            return;
+        }
+        pre.innerHTML = renderGenummerdeRegels(regels);
+        if (kop) {
+            const infoSpan = kop.querySelector('span');
+            if (infoSpan && !infoSpan.dataset.diffLegenda) {
+                infoSpan.textContent += ' · 🎨 afwijkende regels gemarkeerd';
+                infoSpan.dataset.diffLegenda = '1';
+            }
+        }
     });
 }
 
@@ -1501,6 +2010,127 @@ function wisselVertrouwen(knop) {
         knop.disabled = false;
         alert('Opslaan is mislukt, controleer de verbinding.');
     });
+}
+
+function wisselExtensieVertrouwen(knop) {
+    const rij = knop.closest('tr');
+    const pad = rij.dataset.pad;
+    const groepSleutel = knop.dataset.groepSleutel;
+    const hash = knop.dataset.hash;
+    const nuVertrouwd = knop.dataset.vertrouwd === '1';
+    const actie = nuVertrouwd ? 'ontvertrouw' : 'vertrouw';
+
+    knop.disabled = true;
+
+    fetch('extensie_bestand_actie.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'site_id=' + encodeURIComponent(SITE_ID)
+            + '&groep_sleutel=' + encodeURIComponent(groepSleutel)
+            + '&relatief_pad=' + encodeURIComponent(pad)
+            + '&hash=' + encodeURIComponent(hash)
+            + '&actie=' + actie
+            + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+    })
+    .then(r => r.json())
+    .then(data => {
+        knop.disabled = false;
+
+        if (!data.ok) {
+            alert('Opslaan is mislukt, probeer het opnieuw.');
+            return;
+        }
+
+        // Pagina verversen in plaats van alleen de rij te laten
+        // verdwijnen: dat zorgt er meteen voor dat de twee vergelijkings-
+        // viewers ook weg zijn (die tonen anders nog steeds de inhoud van
+        // een bestand dat niet meer als "actief" geselecteerd is, wat
+        // verwarrend oogt), én dat de rij meteen in de juiste tabel
+        // (actief/vertrouwd) terechtkomt zonder de eerdere fade-out-hack.
+        location.reload();
+    })
+    .catch(() => {
+        knop.disabled = false;
+        alert('Opslaan is mislukt, controleer de verbinding.');
+    });
+}
+
+/**
+ * Vertrouwt (of ontvertrouwt) in één keer alle bestanden van een
+ * samengevoegde bulk-cluster (zie groepeerBulkAfwijkingen() /
+ * renderBulkClusterRij() in beveiliging.php) - scheelt bij tientallen
+ * bestanden per cluster het één-voor-één aanklikken van de losse
+ * "Vertrouwen"-knoppen. Verwerkt de bestanden na elkaar (niet
+ * parallel), naar hetzelfde patroon als bulkVertrouwen()/bulkActie()
+ * hierboven, en herlaadt de pagina pas als alles gelukt is - zelfde
+ * reden als bij wisselExtensieVertrouwen(): de vergelijkingsviewers en
+ * de juiste tabel/telling moeten kloppen.
+ */
+function vertrouwCluster(knop) {
+    const items = JSON.parse(knop.dataset.items);
+    const groepSleutel = knop.dataset.groepSleutel;
+    const actie = knop.dataset.actie;
+    const statusSpan = knop.parentElement.querySelector('.cluster-vertrouwen-status');
+
+    if (items.length === 0) {
+        return;
+    }
+
+    const bevestiging = actie === 'vertrouw'
+        ? items.length + ' bestanden in deze groep in één keer vertrouwen?'
+        : items.length + ' bestanden in deze groep niet meer vertrouwen?';
+    if (!confirm(bevestiging)) {
+        return;
+    }
+
+    knop.disabled = true;
+    let huidig = 0;
+    let aantalMislukt = 0;
+
+    const volgende = () => {
+        if (huidig >= items.length) {
+            if (aantalMislukt > 0) {
+                alert(aantalMislukt + ' van de ' + items.length + ' bestand(en) konden niet worden bijgewerkt. Probeer het eventueel per bestand opnieuw.');
+                knop.disabled = false;
+                if (statusSpan) {
+                    statusSpan.textContent = '';
+                }
+                return;
+            }
+            // Alles gelukt: pas hier herladen (zelfde reden als bij de
+            // losse knop) in plaats van na elk los bestand.
+            location.reload();
+            return;
+        }
+
+        const item = items[huidig];
+        if (statusSpan) {
+            statusSpan.textContent = '(' + (huidig + 1) + '/' + items.length + ' verwerkt)';
+        }
+
+        fetch('extensie_bestand_actie.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'site_id=' + encodeURIComponent(SITE_ID)
+                + '&groep_sleutel=' + encodeURIComponent(groepSleutel)
+                + '&relatief_pad=' + encodeURIComponent(item.pad)
+                + '&hash=' + encodeURIComponent(item.hash)
+                + '&actie=' + actie
+                + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.ok) {
+                    aantalMislukt++;
+                }
+            })
+            .catch(() => { aantalMislukt++; })
+            .finally(() => {
+                huidig++;
+                volgende();
+            });
+    };
+    volgende();
 }
 </script>
 

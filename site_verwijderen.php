@@ -182,6 +182,7 @@ $pdo->prepare("DELETE FROM site_extensies WHERE site_id = ?")->execute([$siteId]
 $pdo->prepare("DELETE FROM verdacht_vertrouwd WHERE site_id = ?")->execute([$siteId]);
 $pdo->prepare("DELETE FROM extensie_bestand_hashes WHERE site_id = ?")->execute([$siteId]);
 $pdo->prepare("DELETE FROM extensie_bestand_afwijkingen WHERE site_id = ?")->execute([$siteId]);
+$pdo->prepare("DELETE FROM extensie_bestand_vertrouwd WHERE site_id = ?")->execute([$siteId]);
 $pdo->prepare("DELETE FROM site_scanscript_geschiedenis WHERE site_id = ?")->execute([$siteId]);
 $pdo->prepare("DELETE FROM sites WHERE id = ?")->execute([$siteId]);
 

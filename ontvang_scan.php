@@ -489,4 +489,4 @@ if ($siteId) {
             echo "\nOK: $aantalHashesOpgeslagen extensiebestand-hash(es) opgeslagen voor $domeinVoorVergelijk.";
         }
     }
-}
+}

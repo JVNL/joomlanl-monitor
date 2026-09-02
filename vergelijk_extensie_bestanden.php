@@ -56,14 +56,45 @@ foreach ($rijen as $rij) {
     $perBestand[$sleutel][] = $rij;
 }
 
+/**
+ * Bestanden die een extensie BEWUST per site uniek genereert (bv. een
+ * willekeurige geheime sleutel) - die horen per definitie altijd te
+ * "afwijken" tussen sites, ook op een volkomen schone installatie, en
+ * worden daarom hier helemaal niet vergeleken/gemeld. Bevestigd via de
+ * daadwerkelijke inhoud (schalkhaar.com, augustus 2026): het bestand
+ * bevat alleen een enkele define() met een willekeurige, base64-achtige
+ * waarde, verder geen logica.
+ */
+function isBekendPerSiteUniekBestand(string $relatiefPad): bool
+{
+    $bekendePatronen = [
+        '#^administrator/components/com_akeebabackup/serverkey\.php$#i',
+        // Logbestand van de laatst uitgevoerde back-up - bevat datum/duur/
+        // status van díe specifieke run, verandert dus bij elke nieuwe
+        // back-up (niet alleen per site). Akeeba gebruikt bewust de
+        // .php-extensie i.p.v. .log zodat de inhoud niet als platte tekst
+        // opvraagbaar is via de browser (bevestigd in de changelog van
+        // 10.4.0 en Akeeba's eigen supportdocumentatie, augustus 2026).
+        '#^administrator/components/com_akeebabackup/backup/akeeba\.log\.php$#i',
+    ];
+
+    foreach ($bekendePatronen as $patroon) {
+        if (preg_match($patroon, $relatiefPad)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Resultaat volledig opnieuw opbouwen - dit is altijd een verse
 // momentopname, geen historie.
 $pdo->exec("TRUNCATE TABLE extensie_bestand_afwijkingen");
 
 $invoegStmt = $pdo->prepare("
     INSERT INTO extensie_bestand_afwijkingen
-        (site_id, groep_sleutel, relatief_pad, eigen_hash, meerderheid_hash, aantal_sites_meerderheid, aantal_sites_totaal)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+        (site_id, groep_sleutel, relatief_pad, eigen_hash, meerderheid_hash, aantal_sites_meerderheid, aantal_sites_totaal, eenduidige_meerderheid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ");
 
 $aantalVergeleken = 0;
@@ -74,6 +105,9 @@ foreach ($perBestand as $entries) {
     // Vergelijken heeft alleen zin als hetzelfde bestand (zelfde extensie +
     // versie) op minimaal 2 sites is aangetroffen.
     if (count($entries) < 2) {
+        continue;
+    }
+    if (isBekendPerSiteUniekBestand($entries[0]['relatief_pad'])) {
         continue;
     }
     $aantalVergeleken++;
@@ -93,6 +127,16 @@ foreach ($perBestand as $entries) {
     $aantalMeerderheid = $telling[$meerderheidHash];
     $totaal = count($entries);
 
+    // LET OP: bij een gelijke stand (bijv. 2 sites totaal, elk een eigen,
+    // verschillende hash: 1 tegen 1) kiest arsort() bij gelijke tellingen
+    // stilzwijgend de eerst-aangetroffen hash - dat is geen echte
+    // meerderheid, puur toeval van iteratievolgorde. Expliciet vastleggen
+    // of er daadwerkelijk 1 hash is met de hoogste telling (dus een echte
+    // meerderheid), of dat er meerdere hashes gelijk op de eerste plek
+    // staan (dan is er geen duidelijke "juiste" versie aan te wijzen).
+    $aantalMetHoogsteTelling = count(array_filter($telling, fn($n) => $n === $aantalMeerderheid));
+    $eenduidigeMeerderheid = $aantalMetHoogsteTelling === 1;
+
     foreach ($entries as $entry) {
         if ($entry['hash'] === $meerderheidHash) {
             continue;
@@ -106,6 +150,7 @@ foreach ($perBestand as $entries) {
             $meerderheidHash,
             $aantalMeerderheid,
             $totaal,
+            $eenduidigeMeerderheid ? 1 : 0,
         ]);
 
         $aantalAfwijkingen++;

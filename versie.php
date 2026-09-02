@@ -9,4 +9,4 @@
 // Wordt bijgewerkt via pakket_voorbereiden.php, vlak vóór het maken van een
 // nieuw installatie-/updatepakket.
 
-define('MONITOR_VERSIE', '1.18');
+define('MONITOR_VERSIE', '1.20');

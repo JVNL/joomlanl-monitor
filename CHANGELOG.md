@@ -1,5 +1,21 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.20 - 2026-09-01
+
+### Nieuw: preciezere status bij gegroepeerde extensies met meerdere onderdelen
+- Bij een gegroepeerd product (bijv. een component + losse subplugins die samen tot één rij worden getoond) kon de status "Niet up-to-date" verschijnen naast een versiepaar dat juist al gelijk was - het onderdeel dat de afwijkende status veroorzaakte was namelijk niet per se hetzelfde onderdeel als het representatieve onderdeel waarvan het versienummer werd getoond. Er wordt nu per groep bijgehouden welk specifiek onderdeel (met bijbehorend versiepaar en naam) een "Niet up-to-date"-status veroorzaakt, en dát paar wordt getoond in plaats van altijd het representatieve onderdeel. Werkt op alle plekken waar statussen van meerdere onderdelen samenkomen (representatieve groepering, samengevoegde producten, auteurs-clusters). Met dank aan Astrid voor deze uitbreiding
+
+### Correctie: overbodige catalogusrijen die nergens een eigen feed nodig hebben, bleven soms voor altijd staan
+- Een catalogusrij zonder eigen update-feed-URL werd tot nu toe alleen opgeruimd als ALLE sites er automatisch al een nieuwste versie voor hadden gevonden. Een sleutel die op elke site altijd onderdeel van een pakket is (en dus nooit los een eigen feed nodig heeft, bijv. sommige AcyMailing-subplugins) voldeed daar echter nooit aan - zijn ruwe versie-kolom wordt namelijk nergens rechtstreeks gevuld. Zo'n rij wordt nu ook opgeruimd zodra hij nergens (meer) als los, zelfstandig product wordt gezien, ongeacht die versie-kolom
+
+### Nieuw: zichtbaar wanneer een extensie zonder feed elders al is opgelost
+- Bij "Extensietabel beheren", gefilterd op één specifieke site, staat nu een badge bij een sleutel zonder eigen feed-URL als een ANDERE site 'm al automatisch heeft opgelost - voorheen was niet te zien of zo'n rij op déze site al onnodig was, of dat de rij alleen nog bestaat omdat een andere site 'm nog echt nodig heeft
+
+### Nieuw: samengevoegde weergave voor bulk-afwijkende extensiebestanden
+- Wijken van één extensie+versie tientallen bestanden tegelijk op precies dezelfde manier af van de meerderheid (bijv. een hele Pro-editie versus Core-editie, of een tussentijdse hotfix-build)? Dan werden die voorheen stuk voor stuk als losse rij getoond - bij een extensie met honderden bestanden kon dat de werkelijk interessante uitzondering (een los bestand met een ANDERE site-verdeling dan de rest van diezelfde extensie) volledig doen verdrinken. Bestanden met een identieke site-verdeling worden nu samengevoegd tot één rij (bijv. "73 bestanden wijken op dezelfde manier af"); een bestand dat niet in zo'n samengevoegde rij past, blijft gewoon los zichtbaar en valt daardoor juist op
+- Nieuwe knop "Vertrouw alle N", boven de "Actie"-kolom van zo'n samengevoegde rij: vertrouwt alle bestanden uit die rij in één keer (met voortgangsteller), in plaats van elk bestand los te moeten aanklikken
+- Een nog niet beoordeelde samengevoegde rij staat standaard opengeklapt in plaats van alleen een dichtgeklapt pijltje - zodat iemand die voor het eerst op deze pagina kijkt niet zou missen dat er nog bestanden op beoordeling wachten. Eenmaal vertrouwde rijen (in de aparte "vertrouwd"-sectie) blijven dichtgeklapt, want daar hoeft niets meer mee te gebeuren
+
 ## 1.18 - 2026-08-29
 
 ### Nieuw: kernbestand-integriteitscontrole tegen het officiële Joomla-pakket

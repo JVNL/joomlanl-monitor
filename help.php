@@ -713,6 +713,13 @@ th {
         hebben, hoe betrouwbaarder de vergelijking.
     </div>
     <p><em>Joomla's eigen kernbestanden</em> zitten sinds versie 1.18 bewust niet meer in deze vergelijking - die hebben een eigen, preciezere vergelijking tegen het officiële Joomla-pakket, zie de sectie hieronder.</p>
+    <p><strong>Samengevoegde rijen bij dezelfde afwijking op veel bestanden tegelijk</strong> - wijken van één extensie+versie meerdere bestanden tegelijk op precies dezelfde manier af (dezelfde andere site(s) hebben steeds exact dezelfde inhoud als deze site)? Dan worden die sinds versie 1.20 samengevoegd tot één rij, bijv. "73 bestanden wijken op dezelfde manier af", in plaats van 73 losse regels. Dat wijst meestal op een andere sub-versie/build van diezelfde extensie (bijv. een Pro- versus Core-editie, of een tussentijdse hotfix zonder eigen versienummer) - géén losse verdachte bestanden. Zo'n rij staat, zolang hij nog niet is beoordeeld, standaard al opengeklapt; is hij eenmaal vertrouwd, dan klapt hij (in de aparte "vertrouwd"-sectie) weer dicht.</p>
+    <div class="stap"><strong>"Vertrouw alle N"</strong> - staat boven de "Actie"-kolom, bovenaan zo'n samengevoegde rij. Vertrouwt in één keer alle bestanden uit die rij, in plaats van elk bestand los te moeten aanklikken (met een voortgangsteller tijdens het verwerken). De losse "Vertrouwen"-knop per bestand blijft daarnaast gewoon bestaan, voor het geval je binnen een samengevoegde rij toch een uitzondering wil maken.</div>
+    <div class="tip">
+        💡 Staat een bestand NIET in zo'n samengevoegde rij, maar los ertussen? Dan wijkt dat ene bestand af op een
+        andere manier dan de rest van diezelfde extensie - dat verdient extra aandacht, want dat is precies het
+        soort geïsoleerde afwijking die de moeite waard is om handmatig te controleren.
+    </div>
 
     <h3>Kernbestand-integriteit tegen het officiële Joomla-pakket</h3>
     <p>Naast de meerderheidsvergelijking hierboven (die kijkt naar wat de MEESTE van je eigen sites hebben) staat er, als er iets gevonden is, een aparte sectie <strong>"🛡️ Kernbestanden vs. officieel Joomla-pakket"</strong> - een rechtstreekse vergelijking met het officiële, ongewijzigde Joomla-pakket van downloads.joomla.org. Dat pakket wordt altijd op de monitor zelf gedownload, nooit op een klantsite, en maar één keer per daadwerkelijk voorkomende Joomla-kernversie.</p>

@@ -427,30 +427,7 @@ function isUitgeslotenVanExtensieoverzicht(array $extensie): bool
         return true;
     }
 
-    // Kunena Language Pack heeft nooit een eigen update-feed-URL: zodra er
-    // een update van het hoofdcomponent (Kunena zelf) is, wordt het
-    // taalpakket daar automatisch in meegenomen. Los tonen levert dus altijd
-    // status "onbekend" op, wat misleidend is. BEWUST op auteur + naam
-    // gematcht in plaats van op type/element: Joomla registreert dit
-    // taalpakket afhankelijk van de Kunena-/Joomla-versie soms als
-    // "package", soms (mede) als "module", dus een exacte type/element-check
-    // is te fragiel.
-    if (stripos($auteur, 'kunena') !== false && stripos($naam, 'language pack') !== false) {
-        return true;
-    }
-
-    // mod_kunenalatest en mod_kunenasearch: losse, apart gedistribueerde
-    // Kunena-modules zonder eigen bekende update-feed. Omdat hun "kale"
-    // naam-token ("kunenalatest"/"kunenasearch") het volledige voorvoegsel
-    // "kunena" deelt met pkg_kunena, worden ze door versmeltOpTokenPrefix()
-    // automatisch samengevoegd met het hoofdpakket - waardoor hun onbekende
-    // status de an-zich-wel-bekende status van pkg_kunena overschrijft.
-    // Net als bij het taalpakket: liever helemaal niet los tonen dan een
-    // misleidende "Onbekend"-melding.
-    if ($type === 'module' && in_array($element, ['mod_kunenalatest', 'mod_kunenasearch'], true)) {
-        return true;
-    }
-
+ 
     if ($type === 'file') {
         return true;
     }
@@ -1116,6 +1093,21 @@ function versmeltOpTokenPrefix(array $groepen): array
                 $kortste = min(strlen($tokenA), strlen($tokenB));
 
                 if ($kortste >= 5 && $gedeeld === $kortste) {
+                    // Niet samenvoegen als de kant die zou worden
+                    // "opgeslokt" (de secundaire kant) al ZELF een bekende
+                    // status heeft - dan heeft dit onderdeel kennelijk een
+                    // eigen, bruikbare update-feed (bijv. via Joomla's
+                    // eigen #__update_sites) en verdient het een eigen,
+                    // losse regel i.p.v. te worden ingeslikt door het
+                    // hoofdproduct. Generieke vervanging voor losse,
+                    // hardcoded uitzonderingen per extensie.
+                    $huidigIsComponent = ($huidig['representatief_type'] ?? '') === 'component';
+                    $secundair = $huidigIsComponent ? $kandidaat : $huidig;
+
+                    if (($secundair['status'] ?? null) !== null) {
+                        continue;
+                    }
+
                     $huidig = combineerGegroepeerdeProducten($huidig, $kandidaat);
                     $gebruikt[$j] = true;
                 }

@@ -68,7 +68,7 @@ $totaal = count($sites);
 // beveiligingsstatus, zodat de sites die de meeste aandacht nodig hebben
 // bovenaan komen.
 $sorteerOp = $_GET['sorteer'] ?? 'domein';
-if (!in_array($sorteerOp, ['domein', 'joomla', 'extensies', 'beveiliging'], true)) {
+if (!in_array($sorteerOp, ['domein', 'joomla', 'extensies', 'beveiliging', 'bestanden'], true)) {
     $sorteerOp = 'domein';
 }
 
@@ -851,6 +851,10 @@ function scanEnCheckSites(knop) {
 $telSchoon = 0;
 $telExtensiesAandacht = 0;
 $telBeveiligingAandacht = 0;
+// Losse teller voor de nieuwe "Bestandsafwijkingen"-kolom - bewust niet
+// meegeteld bij $telSchoon/$telBeveiligingAandacht, zie de toelichting
+// verderop bij $ernstBestanden.
+$telBestandenAandacht = 0;
 
 foreach ($sites as $siteVoorTelling) {
     $isGescand = $siteVoorTelling['verdacht_aantal'] !== null;
@@ -866,9 +870,19 @@ foreach ($sites as $siteVoorTelling) {
             $vertrouwdAantalVoorTelling++;
         }
     }
+    // Kernbestand-afwijkingen (vs. het officiële Joomla-pakket) blijven hier
+    // meetellen - dat is een vergelijking met een officieel, ongewijzigd
+    // pakket, dus een hard signaal, net als de reguliere verdachte-scan.
     $issueBeveiliging = (count($itemsVoorTelling) - $vertrouwdAantalVoorTelling) > 0
-        || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0
-        || (int) ($bestandAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0;
+        || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0;
+
+    // Extensiebestand-afwijkingen (vergeleken met de MEERDERHEID van andere
+    // sites) zijn een zachter "wijkt af"-signaal - geen vergelijking met een
+    // officieel pakket, dus geen bevestigde dreiging. Telt daarom niet meer
+    // mee bij "Aandacht nodig - beveiliging" (dat maakte die teller op een
+    // normale site al snel bijna altijd rood, wat het nut ervan als
+    // triage-teller tenietdeed), maar krijgt een eigen, aparte telling.
+    $issueBestanden = (int) ($bestandAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0;
 
     // Extensies: uitsluitend gebaseerd op de volledige scan (site_alle_extensies
     // via $alleDerdePartijSamenvatting) - het oudere, aparte mechanisme
@@ -885,6 +899,9 @@ foreach ($sites as $siteVoorTelling) {
     }
     if ($issueExtensies) {
         $telExtensiesAandacht++;
+    }
+    if ($issueBestanden) {
+        $telBestandenAandacht++;
     }
     if (!$issueBeveiliging && !$issueExtensies) {
         $telSchoon++;
@@ -909,6 +926,10 @@ foreach ($sites as $siteVoorTelling) {
         <strong>Aandacht nodig - beveiliging</strong>
         <span class="<?php echo $telBeveiligingAandacht > 0 ? 'rood' : 'groen'; ?>"><?php echo $telBeveiligingAandacht > 0 ? '🔴' : '🟢'; ?> <?php echo $telBeveiligingAandacht; ?></span>
     </div>
+    <div class="overzicht-item">
+        <strong>Bestandsafwijkingen</strong>
+        <span class="<?php echo $telBestandenAandacht > 0 ? 'oranje' : 'groen'; ?>"><?php echo $telBestandenAandacht > 0 ? '⚠️' : '🟢'; ?> <?php echo $telBestandenAandacht; ?></span>
+    </div>
 </div>
 
 <div class="mobiel-sorteren" style="display: flex; gap: 8px; align-items: flex-end;">
@@ -919,6 +940,7 @@ foreach ($sites as $siteVoorTelling) {
             <option value="joomla" <?php echo $sorteerOp === 'joomla' ? 'selected' : ''; ?>>Joomla versie</option>
             <option value="extensies" <?php echo $sorteerOp === 'extensies' ? 'selected' : ''; ?>>Extensies (meeste aandacht eerst)</option>
             <option value="beveiliging" <?php echo $sorteerOp === 'beveiliging' ? 'selected' : ''; ?>>Beveiliging (meeste aandacht eerst)</option>
+            <option value="bestanden" <?php echo $sorteerOp === 'bestanden' ? 'selected' : ''; ?>>Bestandsafwijkingen (meeste eerst)</option>
         </select>
     </div>
     <a href="?categorie=<?php echo urlencode($categorie); ?>&amp;sorteer=<?php echo urlencode($sorteerOp); ?>&amp;richting=<?php echo urlencode($richting === 'omgekeerd' ? 'normaal' : 'omgekeerd'); ?>"
@@ -934,6 +956,7 @@ foreach ($sites as $siteVoorTelling) {
     <th style="width: 140px;">SSL status<?php echo hulpIcoon('statussen', 'Aantal dagen tot het SSL-certificaat verloopt. Wordt oranje/rood zodra dat aantal dagen laag genoeg is om actie te overwegen.'); ?></th>
     <th style="width: 200px;"><?php echo sorteerKopLink('extensies', 'Extensies', '▼', 'Sorteer op meeste aandacht nodig', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('statussen', 'Groen = alle extensies van derden zijn up-to-date. Rood = er is minstens één verouderde extensie gevonden. Grijs = (deels) onbekend, bijvoorbeeld omdat er nog geen update-locatie voor is geregistreerd.'); ?></th>
     <th style="width: 200px;"><?php echo sorteerKopLink('beveiliging', 'Beveiliging', '▼', 'Sorteer op meeste aandacht nodig', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('beveiliging', 'Toont het aantal nieuwe/niet-vertrouwde items dat de laatste scan heeft gevonden. Groen ("Schoon") betekent dat alles wat gevonden is, al eerder als vertrouwd is gemarkeerd.'); ?></th>
+    <th style="width: 60px; text-align: center;"><?php echo sorteerKopLink('bestanden', '🗂️', '▼', 'Sorteer op meeste bestandsafwijkingen eerst', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('beveiliging', 'Aantal extensiebestanden dat afwijkt van de meerderheid van andere gemonitorde sites (bijv. een andere editie of build) - géén vergelijking met een officieel pakket, dus een zachter signaal dan de Beveiliging-kolom. Groen vinkje = geen afwijkingen.'); ?></th>
     <th style="width: 190px;">Actie<?php echo hulpIcoon('een-site-herscannen', 'Snelle acties per site: opnieuw scannen, site-instellingen, het beveiligingsrapport, het scanscript downloaden, direct openen in je FTP-client, het klantrapport (PDF), en de site verwijderen.'); ?></th>
 </tr>
 
@@ -954,9 +977,16 @@ foreach ($sites as $site) {
     // verdachte items. Nog niet gescand telt als de laagste prioriteit
     // (-1) - daar is immers nog geen concreet probleem van bekend.
     $ernstBeveiliging = -1;
+    // Aparte "ernst"-score voor de nieuwe, losse bestandsafwijkingen-kolom
+    // (zie hieronder) - bewust NIET meer meegeteld bij $ernstBeveiliging,
+    // want dit is een zachter, "wijkt af van de meerderheid"-signaal, geen
+    // bevestigde dreiging zoals de rest van de beveiligingskolom.
+    $ernstBestanden = -1;
+    $siteId = (int)$site['id'];
 
     if ($site['verdacht_aantal'] === null) {
         $beveiliging = "<td data-label=\"Beveiliging\">Nog niet gescand</td>";
+        $bestandenCel = "<td data-label=\"Bestandsafwijkingen\">-</td>";
     } else {
         $items = parseVerdachtDetails($site['verdacht_details'] ?? '');
         $siteVertrouwd = $alleVertrouwdeHashes[$site['id']] ?? [];
@@ -969,18 +999,27 @@ foreach ($sites as $site) {
             }
         }
         $verdachtWeergave = $totaalItems - $vertrouwdAantal;
-        $siteId = (int)$site['id'];
 
         // Kernbestand-afwijkingen tellen mee in de ernst-score (voor de
         // sortering "meeste aandacht eerst"), en krijgen een eigen regel in
         // de kolom - los van de reguliere verdachte-bestanden-regel(s)
         // hieronder, zodat meteen duidelijk is om welk type vondst het gaat.
+        // Dit blijft bewust WEL in de Beveiliging-kolom staan: dit is een
+        // vergelijking met het officiële, ongewijzigde Joomla-pakket, dus
+        // een hard signaal, net als de reguliere verdachte-bestanden-scan.
         $kernAantal = (int) ($kernAfwijkingenPerSite[$site['id']] ?? 0);
-        // Extensie-bestand-afwijkingen (vergeleken met andere sites) tellen
-        // sinds kort ook mee - stonden voorheen nergens op deze pagina,
-        // ondanks dat het beveiligingsrapport ze wel toonde.
+        $ernstBeveiliging = $verdachtWeergave + $kernAantal;
+
+        // Extensie-bestand-afwijkingen (vergeleken met de MEERDERHEID van
+        // andere sites, dus geen vergelijking met een officieel pakket)
+        // krijgen bewust een eigen kolom in plaats van een plek in de
+        // beveiligingskolom: dit is een "wijkt af"-signaal, geen bevestigde
+        // dreiging (kan net zo goed een andere editie/build zijn), en de
+        // aantallen kunnen behoorlijk oplopen (tientallen tot honderden
+        // bestanden bij één enkele afwijkende extensieversie). Dat verdrukte
+        // in de oude opzet het echte beveiligingsoordeel op deze pagina.
         $bestandAantal = (int) ($bestandAfwijkingenPerSite[$site['id']] ?? 0);
-        $ernstBeveiliging = $verdachtWeergave + $kernAantal + $bestandAantal;
+        $ernstBestanden = $bestandAantal;
 
         $regels = [];
 
@@ -1001,11 +1040,6 @@ foreach ($sites as $site) {
             $regels[] = "<a class='rood' href='beveiliging.php?id=$siteId'>⚠️ $kernAantal $kernWoord van officieel pakket</a>";
         }
 
-        if ($bestandAantal > 0) {
-            $bestandWoord = $bestandAantal === 1 ? 'extensiebestand wijkt af' : 'extensiebestanden wijken af';
-            $regels[] = "<a class='rood' href='beveiliging.php?id=$siteId'>⚠️ $bestandAantal $bestandWoord van andere sites</a>";
-        }
-
         $kernVertrouwdAantal = (int) ($kernVertrouwdPerSite[$site['id']] ?? 0);
         if ($kernVertrouwdAantal > 0) {
             $kernVertrouwdWoord = $kernVertrouwdAantal === 1 ? 'afwijkend kernbestand vertrouwd' : 'afwijkende kernbestanden vertrouwd';
@@ -1013,6 +1047,19 @@ foreach ($sites as $site) {
         }
 
         $beveiliging = "<td data-label=\"Beveiliging\">" . implode('<br>', $regels) . "</td>";
+
+        // Losse kolom, alleen een icoontje (+ aantal): groen vinkje als er
+        // niets afwijkt, anders een oranje ⚠️ met het aantal - bewust GEEN
+        // rood en GEEN volzin, om dit visueel duidelijk te onderscheiden van
+        // een bevestigde dreiging in de Beveiliging-kolom hiernaast.
+        if ($bestandAantal === 0) {
+            $bestandenCel = "<td data-label=\"Bestandsafwijkingen\"><a class='groen' href='beveiliging.php?id=$siteId' title='Geen extensiebestanden die afwijken van andere sites'>✅</a></td>";
+        } else {
+            $bestandTitel = $bestandAantal === 1
+                ? '1 extensiebestand wijkt af van de meerderheid van andere sites'
+                : "$bestandAantal extensiebestanden wijken af van de meerderheid van andere sites";
+            $bestandenCel = "<td data-label=\"Bestandsafwijkingen\"><a class='oranje' href='beveiliging.php?id=$siteId' title='" . htmlspecialchars($bestandTitel) . "'>⚠️ $bestandAantal</a></td>";
+        }
     }
 
     // Joomla-versie: controleren of dit de nieuwste versie is BINNEN
@@ -1126,6 +1173,7 @@ foreach ($sites as $site) {
         'sslStatus' => $sslStatus,
         'sslClass' => $sslClass,
         'beveiliging' => $beveiliging,
+        'bestandenCel' => $bestandenCel,
         'joomlaCel' => $joomlaCel,
         'extensiesCel' => $extensiesCel,
         'adminUrl' => $adminUrl,
@@ -1134,6 +1182,7 @@ foreach ($sites as $site) {
         'ftpWachtwoordKopieren' => $ftpWachtwoordKopieren,
         'ftpGebruikersnaamKopieren' => $ftpGebruikersnaamKopieren,
         'ernstBeveiliging' => $ernstBeveiliging,
+        'ernstBestanden' => $ernstBestanden,
         'ernstExtensies' => $ernstExtensies,
         'joomlaHuidig' => $joomlaHuidig,
         'joomlaMajorGetal' => $joomlaMajorGetal,
@@ -1191,6 +1240,10 @@ if ($sorteerOp === 'joomla') {
     usort($weergaveRijen, function ($a, $b) {
         return $b['ernstBeveiliging'] <=> $a['ernstBeveiliging'] ?: strcasecmp($a['site']['domein'] ?? '', $b['site']['domein'] ?? '');
     });
+} elseif ($sorteerOp === 'bestanden') {
+    usort($weergaveRijen, function ($a, $b) {
+        return $b['ernstBestanden'] <=> $a['ernstBestanden'] ?: strcasecmp($a['site']['domein'] ?? '', $b['site']['domein'] ?? '');
+    });
 }
 // Bij "domein" staat de volgorde al goed, want $sites kwam al ORDER BY domein ASC uit de database.
 
@@ -1214,6 +1267,7 @@ if ($richting === 'omgekeerd') {
     $sslStatus = $rij['sslStatus'];
     $sslClass = $rij['sslClass'];
     $beveiliging = $rij['beveiliging'];
+    $bestandenCel = $rij['bestandenCel'];
     $joomlaCel = $rij['joomlaCel'];
     $extensiesCel = $rij['extensiesCel'];
     $adminUrl = $rij['adminUrl'];
@@ -1235,6 +1289,7 @@ if ($richting === 'omgekeerd') {
     <td data-label="SSL status" class="<?php echo $sslClass; ?>"><?php echo htmlspecialchars($sslStatus); ?></td>
     <td data-label="Extensies"><?php echo $extensiesCel; ?></td>
     <?php echo $beveiliging; ?>
+    <?php echo $bestandenCel; ?>
     <td data-label="">
         <div class="rij-acties">
             <span class="rij-spinner" id="spinner-<?php echo (int) $site['id']; ?>" title="Bezig met scannen..." style="display: none;">⏳</span>

@@ -1,4 +1,9 @@
 # Wijzigingslogboek - Mijn Websites Monitor
+## 1.21 - 2026-09-02
+
+### Correctie: Kunena-modules niet zichtbaar in de extensielijst
+- `mod_kunenalatest` en `mod_kunenasearch` werden ten onrechte samengesmolten met het hoofdpakket `pkg_kunena` in `versie_vergelijk_functies.php`, waardoor ze nooit als eigen regel te zien waren in de "Volledige extensielijst (van derden)" - ook niet wanneer ze zelf een eigen, bekende versiestatus hadden
+- Er is nu een controle toegevoegd die vlak vóór het samenvoegen checkt of de kandidaat-module al een eigen bekende status heeft. Is dat zo, dan wordt de samenvoeging overgeslagen en blijft de module als losse regel staan, met zijn eigen correcte status - naast het hoofdpakket, zonder dat daar iets van wordt overschreven
 
 ## 1.20 - 2026-09-01
 
@@ -16,6 +21,18 @@
 - Nieuwe knop "Vertrouw alle N", boven de "Actie"-kolom van zo'n samengevoegde rij: vertrouwt alle bestanden uit die rij in één keer (met voortgangsteller), in plaats van elk bestand los te moeten aanklikken
 - Een nog niet beoordeelde samengevoegde rij staat standaard opengeklapt in plaats van alleen een dichtgeklapt pijltje - zodat iemand die voor het eerst op deze pagina kijkt niet zou missen dat er nog bestanden op beoordeling wachten. Eenmaal vertrouwde rijen (in de aparte "vertrouwd"-sectie) blijven dichtgeklapt, want daar hoeft niets meer mee te gebeuren
 
+## 1.19 - 2026-09-01
+
+### Correctie: gegroepeerde extensie toonde "Niet up-to-date" naast een versiepaar dat al gelijk was
+- Bij een gegroepeerd product kon de status "Niet up-to-date" verschijnen terwijl het getoonde versiepaar zelf al identiek was (bijv. `plg_content_phocaopengraph` toonde 6.0.3/6.0.3, maar toch "Niet up-to-date"). Oorzaak: een uitgeschakeld zusje-onderdeel binnen dezelfde groep (in dit geval `plg_system_phocaopengraph`, 6.0.0→6.0.1) veroorzaakte de afwijkende status, zonder dat zijn eigen versiepaar ergens zichtbaar was
+- Nieuwe helperfuncties (`combineerStatus()`, `maakStatusBron()`) zorgen er nu voor dat bij een "Niet up-to-date"-groep het versiepaar van het daadwerkelijk afwijkende onderdeel wordt getoond, in plaats van altijd het representatieve onderdeel. Een nieuw veld `status_onderdeel_naam` geeft aan welk onderdeel de status veroorzaakt. Doorgevoerd op alle plekken waar groepering plaatsvindt (representatieve groepering, samengevoegde producten, auteurs-clusters)
+
+### Correctie: "Extensies zonder update-feed" toonde onterecht pakketonderdelen
+- Bij "Extensietabel beheren" toonde de lijst "Extensies zonder update-feed" ten onrechte losse pakketonderdelen (bijv. `com_jce`, `plugin_jceacym`, `plugin_acymtriggers`) voor sites waar die onderdelen via `package_id` al correct onder een hoofdpakket geregistreerd stonden. Het sitefilter gebruikt nu dezelfde uitsluitingscontroles als het echte extensieoverzicht
+
+### Nieuw: badge bij extensies zonder feed die op deze site al zijn opgelost
+- Bij "Extensietabel beheren", gefilterd op één specifieke site, staat nu een badge bij een sleutel zonder eigen feed-URL als de nieuwste versie op déze site al bekend is (bijv. via een ander pakketonderdeel) - ook als de rij nog bestaat omdat een andere site 'm nog nodig heeft
+- De badge houdt nu ook rekening met pakket-overerving: een pakket zonder eigen automatische versie (zoals Package AcyMailing) wordt alsnog als "opgelost" herkend zodra een onderdeel ervan (zoals `mod_acym`) wél een bekende nieuwste versie heeft
 ## 1.18 - 2026-08-29
 
 ### Nieuw: kernbestand-integriteitscontrole tegen het officiële Joomla-pakket

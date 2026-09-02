@@ -25,6 +25,7 @@ jobs:
           echo "vorige=$VORIGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Diff-zip bouwen
+        id: bouwen
         if: steps.vorige.outputs.vorige != ''
         run: |
           UITSLUITEN='^\.github/'
@@ -43,10 +44,16 @@ jobs:
             cp /tmp/verwijderd.txt "/tmp/diffbestanden/VERWIJDERDE_BESTANDEN.txt"
           fi
 
-          cd /tmp/diffbestanden && zip -r "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" .
+          if [ "$(ls -A /tmp/diffbestanden)" ]; then
+            cd /tmp/diffbestanden && zip -r "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" .
+            echo "heeft_zip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Geen verschillen gevonden, geen update-zip nodig."
+            echo "heeft_zip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Diff-zip uploaden naar de release
-        if: steps.vorige.outputs.vorige != ''
+        if: steps.bouwen.outputs.heeft_zip == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

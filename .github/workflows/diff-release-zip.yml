@@ -3,6 +3,14 @@ name: Diff-zip bij release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      huidige_tag:
+        description: 'Tag waarvoor de update-zip gemaakt moet worden (bv. v1.20)'
+        required: true
+      vorige_tag:
+        description: 'Vorige tag om mee te vergelijken (leeg = automatisch de tag ervoor)'
+        required: false
 
 permissions:
   contents: write
@@ -19,8 +27,16 @@ jobs:
       - name: Vorige tag bepalen
         id: vorige
         run: |
-          HUIDIGE_TAG="${GITHUB_REF_NAME}"
-          VORIGE_TAG=$(git tag --sort=-creatordate | grep -v "^${HUIDIGE_TAG}$" | head -n1)
+          if [ -n "${{ github.event.inputs.huidige_tag }}" ]; then
+            HUIDIGE_TAG="${{ github.event.inputs.huidige_tag }}"
+          else
+            HUIDIGE_TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ -n "${{ github.event.inputs.vorige_tag }}" ]; then
+            VORIGE_TAG="${{ github.event.inputs.vorige_tag }}"
+          else
+            VORIGE_TAG=$(git tag --sort=-creatordate | grep -v "^${HUIDIGE_TAG}$" | head -n1)
+          fi
           echo "huidige=$HUIDIGE_TAG" >> "$GITHUB_OUTPUT"
           echo "vorige=$VORIGE_TAG" >> "$GITHUB_OUTPUT"
 

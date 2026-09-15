@@ -247,13 +247,20 @@ if ($afzenderNaam === '') {
     $afzenderNaam = 'Mijn Websites Monitor';
 }
 
-$headers = "Content-Type: text/html; charset=utf-8\r\n";
+$headers  = "MIME-Version: 1.0\r\n";
+$headers .= "Content-Type: text/html; charset=utf-8\r\n";
+$headers .= "Content-Transfer-Encoding: 8bit\r\n";
 // Niet-ASCII-tekens (bijv. accenten) moeten volgens de mailstandaard
 // gecodeerd worden in de header - mb_encode_mimeheader doet dat, en
 // laat platte ASCII-namen gewoon ongewijzigd.
 $afzenderNaamGecodeerd = mb_encode_mimeheader($afzenderNaam, 'UTF-8', 'B');
 $headers .= "From: $afzenderNaamGecodeerd <$naar>\r\n";
 
-mail($naar, $onderwerp, $inhoud, $headers);
+// Het onderwerp bevat een emoji (⚠️) en moet daarom, net als de
+// afzendernaam hierboven, RFC 2047-gecodeerd worden - anders wordt de
+// mail door spamfilters gemarkeerd (SUBJECT_NEEDS_ENCODING).
+$onderwerpGecodeerd = mb_encode_mimeheader($onderwerp, 'UTF-8', 'B');
+
+mail($naar, $onderwerpGecodeerd, $inhoud, $headers);
 
 echo "OK: e-mail verstuurd naar $naar voor $aantalSites site(s).\n";

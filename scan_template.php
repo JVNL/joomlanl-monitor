@@ -1926,6 +1926,28 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         }
     }
 
+    // PATROON 23: str_rot13() + eval() - "Undergrounds Webshells"-familie
+    // (auteur "haxorgt"). De hele payload (file manager + shell-commando's
+    // + upload) zit in een heredoc-string die pas at runtime via
+    // str_rot13() ontsleuteld en met eval() uitgevoerd wordt - geen van de
+    // bovenstaande patronen (die op leesbare eval/base64-combinaties
+    // zoeken) pikt dit op: geen zichtbare eval(base64_decode, geen tweede
+    // <?php-tag in de brontekst (ontstaat pas na decodering), en geen
+    // herkenbare stringmarkers (ook die zijn zelf geROT13'd). str_rot13()
+    // heeft vrijwel geen legitiem gebruik in Joomla-extensies - combinatie
+    // met eval() in hetzelfde bestand is op zichzelf al een zeer sterk
+    // signaal. Ontdekt op touwslagerij.com (media/-submappen van
+    // plg_system_osmylicensesmanager, com_templates en twee vendor-mappen),
+    // sept 2026.
+    if (!$verdacht && preg_match('/str_rot13\s*\(/i', $inhoud) && preg_match('/eval\s*\(/i', $inhoud)) {
+        if (preg_match('/eval\s*\(\s*["\']?\?>["\']?\s*\.\s*str_rot13/i', $inhoud)) {
+            $reden = 'eval("?>".str_rot13(...)) - exacte vingerafdruk van de "Undergrounds Webshells"-familie (str_rot13-versleutelde heredoc-payload), ZEKER BACKDOOR';
+        } else {
+            $reden = 'str_rot13() + eval() in hetzelfde bestand - vrijwel geen legitiem gebruik in Joomla-extensies, sterk verdacht op verborgen payload';
+        }
+        $verdacht = true;
+    }
+
     if ($verdacht) {
         $vondsten[] = [
             'naam' => str_replace(__DIR__, '', $bestandpad),

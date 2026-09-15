@@ -1,4 +1,13 @@
 # Wijzigingslogboek - Mijn Websites Monitor
+
+## 1.22 - 2026-09-15
+
+### Nieuw: bredere backdoor-detectie
+- Patroon 23 toegevoegd: `str_rot13()` + `eval()` in hetzelfde bestand. Vangt de "Undergrounds Webshells"-familie (auteur "haxorgt"), waarvan de volledige payload (file manager, shell-commando's, upload) verborgen zit in een heredoc-string die pas at runtime via `str_rot13()` ontsleuteld en met `eval()` uitgevoerd wordt - geen enkel bestaand patroon (die allemaal op leesbare eval/base64-combinaties zoeken) pikte dit op, want er is geen zichtbare `eval(base64_decode`, geen tweede `<?php`-tag in de brontekst (ontstaat pas na decodering) en geen herkenbare stringmarkers (ook die zijn zelf geROT13'd). Een specifiekere variant (`eval("?>".str_rot13(...))`, de exacte vingerafdruk van deze webshell-familie) wordt als "ZEKER BACKDOOR" gemeld, de kale combinatie als "VERDACHT". Ontdekt op een klantsite (touwslagerij.com): in eerste instantie 4 kopieën gevonden via handmatig zoeken (buiten de monitor om), later - na toevoeging van dit patroon - bleken het er 18 te zijn, verspreid over administrator/components, modules, libraries, plugins en media. Dezelfde scan signaleerde op diezelfde site, via de al langer bestaande cloaking-detectie op kernbestanden, ook een toegevoegd blok in `index.php` dat bij Googlebot-achtige user-agents een los bestand laadde dat op zijn beurt een externe, voor deze site op maat gemaakte spampagina ophaalde en rechtstreeks aan de zoekmachine toonde
+
+### Bugfix: monitor-notificatiemail kwam in spam terecht
+- De e-mail met scanresultaten (verstuurd vanaf het eigen mailaccount naar het notificatieadres) miste een aantal standaard MIME-headers (`MIME-Version`, `Content-Transfer-Encoding`), en het onderwerp (dat een emoji bevat) was niet volgens RFC 2047 gecodeerd - beide zorgden ervoor dat spamfilters (o.a. Outlook/webmail) de mail eerder als verdacht beoordeelden. Beide nu toegevoegd/gecorrigeerd
+
 ## 1.21 - 2026-09-02
 
 ### Correctie: Kunena-modules niet zichtbaar in de extensielijst

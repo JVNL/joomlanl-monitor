@@ -171,6 +171,23 @@ if (!is_array($resultaat)) {
         exit;
     }
 
+    // "406 Not Acceptable - An appropriate representation of the requested resource could not be found on this
+    // server" is de standaardtekst van Apache bij een blokkade door een webapplicatie-firewall (mod_security, bv. de
+    // Comodo-regels op cPanel-hosting): die gebruikt vaak status 406 in plaats van 403. Bij "Bekijk" gebeurt dat soms
+    // om de INHOUD van het bestand zelf (verdachte JavaScript/PHP in het antwoord) - dan is de vraag "staat het
+    // scanscript daar nog in de meest recente versie?" juist misleidend, want het scanscript deed zijn werk.
+    if ($httpCode === 406) {
+        echo json_encode([
+            'succes' => false,
+            'foutmelding' => 'Deze actie werd geblokkeerd met HTTP 406 (Not Acceptable) - vrijwel altijd een webapplicatie-firewall '
+                . '(mod_security) van de hostingpartij, los van deze monitor en van Joomla. Bij "Bekijk" gebeurt dat soms om de INHOUD '
+                . 'van het bestand zelf (bijvoorbeeld verdachte JavaScript of PHP-code in het antwoord). Bekijk het bestand dan via '
+                . 'FTP, of vraag de hostingpartij om een uitzondering voor POST-verzoeken naar ' . $scanBestandsnaam . '. '
+                . 'Het scanscript zelf is in dat geval niet ontbrekend of verouderd.',
+        ]);
+        exit;
+    }
+
     echo json_encode([
         'succes' => false,
         'foutmelding' => "Onverwacht antwoord van de site (HTTP $httpCode). Staat {$scanBestandsnaam} daar nog in de meest recente versie? "

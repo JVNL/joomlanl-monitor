@@ -40,6 +40,15 @@ jobs:
           echo "huidige=$HUIDIGE_TAG" >> "$GITHUB_OUTPUT"
           echo "vorige=$VORIGE_TAG" >> "$GITHUB_OUTPUT"
 
+          # Debug: alle bekende tags + welke twee er nu precies gekozen zijn -
+          # zichtbaar in de run-log, zodat een leeg diff-resultaat voortaan
+          # meteen te verklaren is zonder achteraf te moeten reconstrueren.
+          echo "--- Alle tags (nieuwste eerst) ---"
+          git tag --sort=-creatordate
+          echo "--- Gekozen voor deze run ---"
+          echo "huidige_tag: $HUIDIGE_TAG (commit: $(git rev-list -n 1 $HUIDIGE_TAG 2>/dev/null || echo 'ONBEKEND - tag bestaat niet!'))"
+          echo "vorige_tag:  $VORIGE_TAG (commit: $(git rev-list -n 1 $VORIGE_TAG 2>/dev/null || echo 'ONBEKEND - tag bestaat niet!'))"
+
       - name: Diff-zip bouwen
         id: bouwen
         if: steps.vorige.outputs.vorige != ''
@@ -60,11 +69,14 @@ jobs:
             cp /tmp/verwijderd.txt "/tmp/diffbestanden/VERWIJDERDE_BESTANDEN.txt"
           fi
 
+          echo "--- Gevonden gewijzigde bestanden ---"
+          cat /tmp/gewijzigd.txt
+
           if [ "$(ls -A /tmp/diffbestanden)" ]; then
             cd /tmp/diffbestanden && zip -r "/tmp/update-${{ steps.vorige.outputs.huidige }}.zip" .
             echo "heeft_zip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Geen verschillen gevonden, geen update-zip nodig."
+            echo "::warning::Geen verschillen gevonden tussen ${{ steps.vorige.outputs.vorige }} en ${{ steps.vorige.outputs.huidige }} - geen update-zip aangemaakt. Controleer of dit klopt!"
             echo "heeft_zip=false" >> "$GITHUB_OUTPUT"
           fi
 

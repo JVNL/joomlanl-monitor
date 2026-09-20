@@ -713,6 +713,10 @@ header .knop {
 .btn-vertrouwen   { background: #1f8a4c; }
 
 .viewer {
+    /* Markering van opvallende regels in de code: bewust altijd zwart op geel, ook in de donkere modus - de weergave zelf
+       heeft zijn eigen, vaste donkere kleurenschema (zie hieronder). */
+    --markering-bg: #ffe14d;
+    --markering-tekst: #000000;
     margin: 15px 0;
     background: #1e293b;
     color: #a5f3fc;
@@ -745,6 +749,75 @@ header .knop {
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+/* Code met gemarkeerde regels (zie renderCodeMetMarkeringen()) */
+.viewer .code-legenda {
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    background: #0f172a;
+    border-top: 1px solid #334155;
+    color: #e2e8f0;
+}
+.viewer .code-legenda .blokje {
+    display: inline-block;
+    padding: 0 8px;
+    margin-right: 4px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+.viewer .code-legenda .blokje-hoog {
+    background: var(--markering-bg);
+    color: var(--markering-tekst);
+}
+.viewer .code-legenda .blokje-letop {
+    border-left: 4px solid var(--markering-bg);
+    background: rgba(255, 225, 77, 0.12);
+}
+.viewer .code-regel {
+    display: flex;
+}
+.viewer .code-nr {
+    flex: 0 0 44px;
+    text-align: right;
+    padding-right: 10px;
+    margin-right: 8px;
+    color: #64748b;
+    border-right: 1px solid #334155;
+    user-select: none;
+}
+.viewer .code-tekst {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.viewer .code-hoog {
+    background: var(--markering-bg);
+    color: var(--markering-tekst);
+}
+.viewer .code-hoog .code-nr {
+    color: var(--markering-tekst);
+    border-right-color: var(--markering-tekst);
+    font-weight: bold;
+}
+.viewer .code-letop {
+    border-left: 4px solid var(--markering-bg);
+    background: rgba(255, 225, 77, 0.12);
+}
+.viewer .code-uitleg {
+    padding: 3px 10px 4px 62px;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: normal;
+    word-break: normal;
+}
+.viewer .code-uitleg.code-hoog {
+    font-weight: bold;
+}
+.viewer .code-uitleg.code-letop {
+    color: #fde68a;
 }
 
 .beheer-sectie {
@@ -848,6 +921,11 @@ header .knop {
         <strong>Laatste scan</strong>
         <?php echo $laatsteScan ? htmlspecialchars(date('d-m-Y H:i', strtotime($laatsteScan))) : '-'; ?>
     </div>
+</div>
+<div class="uitleg" style="margin-bottom: 15px;">
+    ℹ️ Dit rapport toont de stand van de laatste <em>ontvangen</em> scan. Wijzigingen daarna - bijvoorbeeld bestanden die je via FTP
+    hebt verwijderd - zie je hier pas na een nieuwe scan. Een verzamelmelding (type cluster) blijft ook staan als je de losse
+    bestanden al hebt verwijderd, totdat een nieuwe scan is aangekomen.
 </div>
 
 <?php
@@ -968,6 +1046,8 @@ if (!empty($site['super_users_json'])) {
 </tr>
 <?php foreach ($teTonenItems as $item): ?>
 <?php $isVertrouwd = isset($vertrouwdHashes[$item['hash']]); ?>
+<?php // Joomla's eigen ingangsbestanden: quarantaine/blokkeer/verwijder zou de hele site platleggen - vervangen door het origineel is de juiste weg. ?>
+<?php $isKernEntree = in_array('/' . ltrim(str_replace('\\', '/', $item['naam']), '/'), ['/index.php', '/administrator/index.php', '/api/index.php', '/includes/app.php'], true); ?>
 <tr class="<?php echo $isVertrouwd ? 'vertrouwd-rij' : ''; ?>" data-pad="<?php echo htmlspecialchars($item['naam']); ?>" data-rij-type="<?php echo htmlspecialchars(strtolower($item['type'])); ?>">
     <td data-label="" class="vinkje-kolom">
         <input
@@ -976,6 +1056,7 @@ if (!empty($site['super_users_json'])) {
             data-hash="<?php echo htmlspecialchars($item['hash']); ?>"
             data-naam="<?php echo htmlspecialchars($item['naam']); ?>"
             data-type="<?php echo htmlspecialchars(strtolower($item['type'])); ?>"
+            data-kernentree="<?php echo $isKernEntree ? '1' : '0'; ?>"
             onclick="bulkKnoppenBijwerken()"
         >
     </td>
@@ -997,9 +1078,13 @@ if (!empty($site['super_users_json'])) {
             <?php if (strtolower($item['type']) !== 'database' && strtolower($item['type']) !== 'cluster'): ?>
             <button type="button" class="btn-bekijk" onclick="beheerBekijk(this)">👁️ Bekijk</button>
             <button type="button" class="btn-rechten" onclick="beheerRechtenHerstellen(this)">🔧 Rechten herstellen</button>
+            <?php if (!$isKernEntree): ?>
             <button type="button" class="btn-quarantaine" onclick="beheerActie(this, 'quarantaine', 'In quarantaine plaatsen? Herstelbaar via de beheersectie hieronder.')">📦 Quarantaine</button>
             <button type="button" class="btn-blokkeer" onclick="beheerActie(this, 'blokkeer', 'Blokkeren? Blijft op zijn plek maar wordt onuitvoerbaar. Herstelbaar.')">🚫 Blokkeer</button>
             <button type="button" class="btn-verwijder" onclick="beheerActie(this, 'verwijder', 'Naar de prullenbak verplaatsen? Wordt na 7 dagen automatisch definitief verwijderd.')">🗑️ Verwijder</button>
+            <?php else: ?>
+            <div style="font-size: 11px; color: var(--thema-uitleg-tekst);">Joomla-kernbestand: quarantaine, blokkeren en verwijderen zijn hier uitgeschakeld (de site valt dan uit). Vervang het door het origineel via de sectie "Kernbestanden vs. officieel Joomla-pakket" hieronder.</div>
+            <?php endif; ?>
             <?php elseif (strtolower($item['type']) === 'cluster'): ?>
             <div style="font-size: 11px; color: var(--thema-uitleg-tekst);">Verzamelmelding over meerdere bestanden - niet als één geheel te verwijderen. Bekijk en verwerk de afzonderlijke bestanden handmatig via FTP (zie "Reden").</div>
             <?php else: ?>
@@ -1227,18 +1312,79 @@ function zetVoortgang(percentage, klaar = false, fout = false) {
     balkBinnen.classList.toggle('fout', fout);
 }
 
-function herscanDezeSite(knop) {
-    knop.disabled = true;
-
+// Toont een melding boven de tabel, in de kleuren van het actieve thema (licht/donker).
+// soort: 'neutraal' | 'ok' | 'waarschuwing' | 'fout'
+function toonHerscanMelding(soort, tekst) {
     const melding = document.getElementById('melding');
+    const kleurVar = { ok: '--thema-groen', waarschuwing: '--thema-geel', fout: '--thema-rood' }[soort];
     melding.className = '';
     melding.style.display = 'block';
-    melding.style.background = '#eef1f4';
-    melding.style.color = '#333';
-    melding.textContent = '⏳ Scan wordt gestart voor deze website...';
+    melding.style.background = 'var(--thema-kader-bg)';
+    melding.style.color = kleurVar ? 'var(' + kleurVar + ')' : 'var(--thema-tekst)';
+    melding.style.border = '1px solid ' + (kleurVar ? 'var(' + kleurVar + ')' : 'var(--thema-rand)');
+    melding.textContent = tekst;
+}
+
+// Zet "2026-09-19 17:56:02" (zoals MySQL het teruggeeft) om naar "19-09-2026 17:56".
+function formatteerScanTijd(mysqlTijd) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(mysqlTijd || '');
+    return m ? (m[3] + '-' + m[2] + '-' + m[1] + ' ' + m[4] + ':' + m[5]) : '';
+}
+
+// Haalt op wanneer het meest recente scanresultaat van deze site BIJ DE MONITOR is aangekomen
+// (niet wanneer een scan is gestart). Alleen zo weten we zeker dat een nieuwe scan ook echt
+// resultaat heeft opgeleverd: het scanscript stuurt zijn uitkomst zelf terug, en dat kan mislukken.
+function haalLaatsteScanTijd() {
+    return fetch('start_scan.php?site_id=' + SITE_ID + '&alleen_status=1')
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(data => data.laatste_scan || '');
+}
+
+// Wacht (max. maxSeconden) tot de laatste-scan-tijd verschilt van basisTijd. Geeft een Promise
+// terug die met true (nieuw resultaat aangekomen) of false (time-out) wordt afgerond.
+function wachtOpNieuwScanresultaat(basisTijd, maxSeconden, opVoortgang) {
+    return new Promise(resolve => {
+        let verstreken = 0;
+        const controleer = () => {
+            haalLaatsteScanTijd()
+                .then(nu => nu !== basisTijd)
+                .catch(() => false) // een haperende statusvraag is geen reden om op te geven
+                .then(isNieuw => {
+                    if (isNieuw) {
+                        resolve(true);
+                        return;
+                    }
+                    if (verstreken >= maxSeconden) {
+                        resolve(false);
+                        return;
+                    }
+                    opVoortgang(verstreken, maxSeconden);
+                    verstreken += 2;
+                    setTimeout(controleer, 2000);
+                });
+        };
+        controleer();
+    });
+}
+
+function herscanDezeSite(knop) {
+    const MAX_WACHTTIJD_SECONDEN = 90;
+    knop.disabled = true;
+
+    toonHerscanMelding('neutraal', '⏳ Scan wordt gestart voor deze website...');
     zetVoortgang(5);
 
-    fetch('start_scan.php?site_id=' + SITE_ID)
+    let basisTijd = '';
+
+    haalLaatsteScanTijd()
+        .catch(() => '')
+        .then(tijd => {
+            basisTijd = tijd;
+            return fetch('start_scan.php?site_id=' + SITE_ID);
+        })
         .then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
             return r.text();
@@ -1247,73 +1393,80 @@ function herscanDezeSite(knop) {
             if (tekst.includes('⚠️')) {
                 // Het scanverzoek zelf kwam al niet goed aan (bijv. een
                 // .htaccess-bestand dat het onderschept) - dan heeft
-                // doorgaan naar de wachttijd/hercontrole geen zin.
-                melding.style.background = '#fff3cd';
-                melding.style.color = '#665200';
-                melding.textContent = tekst.replace(/^[^:]+:\s*/, '');
+                // wachten op een resultaat geen zin.
+                toonHerscanMelding('waarschuwing', tekst.replace(/^[^:]+:\s*/, ''));
                 zetVoortgang(5, false, true);
                 knop.disabled = false;
-                return;
+                return null;
             }
 
-            const WACHTTIJD_SECONDEN = 10;
-            const percentageBijStartWachten = 10;
-            const percentageBijEindeWachten = 55;
-            let secondenOver = WACHTTIJD_SECONDEN;
+            toonHerscanMelding('neutraal', '✅ Scan gestart. Wachten op het resultaat van de website...');
+            zetVoortgang(10);
 
-            melding.textContent = '✅ Scan gestart. Even wachten... (' + secondenOver + ')';
-            zetVoortgang(percentageBijStartWachten);
-
-            const teller = setInterval(() => {
-                secondenOver--;
-
-                const voortgang = percentageBijStartWachten
-                    + (percentageBijEindeWachten - percentageBijStartWachten)
-                    * (WACHTTIJD_SECONDEN - secondenOver) / WACHTTIJD_SECONDEN;
-                zetVoortgang(voortgang);
-
-                if (secondenOver > 0) {
-                    melding.textContent = '✅ Scan gestart. Even wachten... (' + secondenOver + ')';
-                } else {
-                    clearInterval(teller);
-                    melding.textContent = '⏳ Website- en SSL-status controleren...';
-                    zetVoortgang(percentageBijEindeWachten);
-
-                    fetch('check_sites.php?site_id=' + SITE_ID)
-                        .then(r => {
-                            if (!r.ok) throw new Error('HTTP ' + r.status);
-                            return r.text();
-                        })
-                        .then(() => {
-                            melding.textContent = '⏳ Joomla- en extensieversies ophalen...';
-                            zetVoortgang(80);
-                            return fetch('haal_versies_op.php?site_id=' + SITE_ID);
-                        })
-                        .then(r => {
-                            if (!r.ok) throw new Error('HTTP ' + r.status);
-                            return r.text();
-                        })
-                        .then(() => {
-                            melding.style.background = '#d4edda';
-                            melding.style.color = '#155724';
-                            melding.textContent = '✅ Deze website is opnieuw gescand — pagina wordt herladen...';
-                            zetVoortgang(100, true);
-                            setTimeout(() => location.reload(), 1200);
-                        })
-                        .catch(err => {
-                            melding.style.background = '#f8d7da';
-                            melding.style.color = '#721c24';
-                            melding.textContent = '❌ Er ging iets mis: ' + err.message;
-                            zetVoortgang(percentageBijEindeWachten, false, true);
-                            knop.disabled = false;
-                        });
+            // Niet meer een vaste wachttijd en dan "klaar" melden: de scan is pas
+            // klaar als de monitor het resultaat ook echt heeft ontvangen.
+            return wachtOpNieuwScanresultaat(basisTijd, MAX_WACHTTIJD_SECONDEN, (verstreken, max) => {
+                zetVoortgang(10 + 45 * (verstreken / max));
+                toonHerscanMelding('neutraal', '⏳ Wachten op het resultaat van de website... (' + verstreken + ' s)');
+            }).then(aangekomen => {
+                if (!aangekomen) {
+                    const vorige = formatteerScanTijd(basisTijd);
+                    toonHerscanMelding('waarschuwing',
+                        '⚠️ De scan is gestart, maar er is binnen ' + MAX_WACHTTIJD_SECONDEN + ' seconden geen nieuw scanresultaat van de website '
+                        + 'bij de monitor aangekomen. Wat hieronder staat is dus nog de stand van de laatste ontvangen scan '
+                        + (vorige ? '(' + vorige + ')' : '(er is nog nooit een resultaat ontvangen)')
+                        + ' en kan verouderd zijn - ook bestanden die je inmiddels hebt verwijderd kunnen er nog in staan. '
+                        + 'Open het scanscript via het 📋-icoontje op het overzicht en kijk onder "=== MONITOR ===" waarom het resultaat niet aankomt.');
+                    zetVoortgang(55, false, true);
+                    knop.disabled = false;
+                    return null;
                 }
-            }, 1000);
+
+                toonHerscanMelding('neutraal', '⏳ Website- en SSL-status controleren...');
+                zetVoortgang(60);
+
+                return fetch('check_sites.php?site_id=' + SITE_ID)
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.text();
+                    })
+                    .then(() => {
+                        toonHerscanMelding('neutraal', '⏳ Joomla- en extensieversies ophalen...');
+                        zetVoortgang(80);
+                        return fetch('haal_versies_op.php?site_id=' + SITE_ID);
+                    })
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.text();
+                    })
+                    .then(() => {
+                        toonHerscanMelding('neutraal', '⏳ Kernbestanden met het officiële Joomla-pakket vergelijken...');
+                        zetVoortgang(90);
+
+                        // Gebeurde tot nu toe alleen via de cronjob - na een herscan ontbrak de vergelijking dus, en daarmee
+                        // een afwijkend kernbestand (met de knop "Automatisch vervangen door origineel"). Een fout hier
+                        // (bv. het pakket kon niet worden gedownload) mag de scan zelf niet laten mislukken.
+                        return fetch('vergelijk_kern_bestanden.php').then(r => r.text()).catch(() => '');
+                    })
+                    .then(kernTekst => {
+                        if (/Waarschuwing/i.test(kernTekst || '')) {
+                            // Het pakket kon niet worden opgehaald: wel opnieuw gescand, maar de kernvergelijking ontbreekt.
+                            const regels = kernTekst.split('\n');
+                            const eerste = (regels.find(r => /Kon officieel/i.test(r)) || regels.find(r => /kon niet/i.test(r)) || '').trim().replace(/^-\s*/, '');
+                            toonHerscanMelding('waarschuwing', '✅ Deze website is opnieuw gescand, maar ⚠️ de kernbestanden konden niet met het officiële Joomla-pakket worden vergeleken. '
+                                + eerste);
+                            zetVoortgang(100, true);
+                            setTimeout(() => location.reload(), 9000);
+                            return;
+                        }
+                        toonHerscanMelding('ok', '✅ Deze website is opnieuw gescand — pagina wordt herladen...');
+                        zetVoortgang(100, true);
+                        setTimeout(() => location.reload(), 1200);
+                    });
+            });
         })
         .catch(err => {
-            melding.style.background = '#f8d7da';
-            melding.style.color = '#721c24';
-            melding.textContent = '❌ Er ging iets mis bij het starten van de scan: ' + err.message;
+            toonHerscanMelding('fout', '❌ Er ging iets mis: ' + err.message);
             zetVoortgang(5, false, true);
             knop.disabled = false;
         });
@@ -1384,6 +1537,46 @@ const viewerParenInhoud = {};
  * blijven kijken om verschillen te vinden. Wordt gebruikt voor zowel de
  * gewone (niet-vergeleken) weergave als de diff-gekleurde weergave.
  */
+/**
+ * Toont code met de opvallende regels gemarkeerd, en onder elke gemarkeerde regel een korte uitleg in gewoon
+ * Nederlands. De markeringen komen van het scanscript op de site (bepaalVerdachteRegels() in scan_template.php).
+ * Alles wat uit de code of de uitleg komt wordt geëscaped: de inhoud van een verdacht bestand is per definitie
+ * niet te vertrouwen.
+ */
+function renderCodeMetMarkeringen(inhoud, markeringen) {
+    const perRegel = {};
+    (markeringen || []).forEach(m => {
+        perRegel[parseInt(m.regel, 10)] = m;
+    });
+
+    return inhoud.split('\n').map((tekst, idx) => {
+        const nr = idx + 1;
+        const m = perRegel[nr];
+        const klasse = m ? (m.ernst === 'hoog' ? ' code-hoog' : ' code-letop') : '';
+        let html = '<div class="code-regel' + klasse + '">'
+            + '<span class="code-nr">' + nr + '</span>'
+            + '<span class="code-tekst">' + (tekst === '' ? '&nbsp;' : escapeHtml(tekst)) + '</span>'
+            + '</div>';
+        if (m) {
+            html += '<div class="code-uitleg' + klasse + '">↳ ' + escapeHtml(m.uitleg || '') + '</div>';
+        }
+        return html;
+    }).join('');
+}
+
+function codeLegendaHtml(markeringen) {
+    const aantalHoog = (markeringen || []).filter(m => m.ernst === 'hoog').length;
+    const aantalLetOp = (markeringen || []).length - aantalHoog;
+    let tekst = '<div class="code-legenda">🔎 <strong>' + (markeringen || []).length + ' regel(s) vallen op.</strong> ';
+    if (aantalHoog > 0) {
+        tekst += '<span class="blokje blokje-hoog">geel</span> ' + aantalHoog + 'x: hier gebeurt waarschijnlijk het kwaad. ';
+    }
+    if (aantalLetOp > 0) {
+        tekst += '<span class="blokje blokje-letop">gele rand</span> ' + aantalLetOp + 'x: let op, komt ook in gewone code voor. ';
+    }
+    return tekst + '<br>Dit is een automatische aanwijzing, geen bewijs: lees de uitleg onder elke gemarkeerde regel.</div>';
+}
+
 function renderGenummerdeRegels(regels) {
     return regels.map((r, idx) => {
         const achtergrond = r.type === 'anders' ? 'background: rgba(255, 99, 71, 0.35);' : '';
@@ -1395,10 +1588,43 @@ function renderGenummerdeRegels(regels) {
     }).join('');
 }
 
+/**
+ * Sluit het losse bekijk-venster (#bekijk-viewer) - of, bij "Bekijk" op meerdere items tegelijk,
+ * alleen het paneel van dat ene item - zodra het getoonde bestand is verwijderd, in quarantaine
+ * gezet of geblokkeerd. Zonder dit bleef de inhoud van een bestand dat al niet meer bestaat
+ * gewoon in beeld staan.
+ */
+function sluitViewerVoorPad(pad) {
+    const viewer = document.getElementById('bekijk-viewer');
+    if (!viewer) {
+        return;
+    }
+
+    // Enkelvoudige weergave (beheerBekijk): het pad staat op de container zelf.
+    if (viewer.dataset.pad === pad) {
+        viewer.innerHTML = '';
+        delete viewer.dataset.pad;
+        return;
+    }
+
+    // Meervoudige weergave (bulkBekijken): elk paneel heeft zijn eigen pad.
+    Array.from(viewer.children).forEach(paneel => {
+        if (paneel.dataset && paneel.dataset.pad === pad) {
+            paneel.remove();
+        }
+    });
+}
+
 function beheerBekijk(knop, viewerId = 'bekijk-viewer', siteId = SITE_ID, siteLabel = '') {
     const rij = knop.closest('tr');
     const pad = rij.dataset.pad;
     const viewer = document.getElementById(viewerId);
+
+    // Alleen het losse bekijk-venster hoort bij de vondsten-tabel; de -a/-b-panelen van de
+    // extensie-vergelijking niet.
+    if (viewerId === 'bekijk-viewer') {
+        viewer.dataset.pad = pad;
+    }
 
     viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>⏳ Laden...</strong></div></div>';
     viewer.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1419,9 +1645,16 @@ function beheerBekijk(knop, viewerId = 'bekijk-viewer', siteId = SITE_ID, siteLa
         const regelsVoorWeergave = data.type === 'bestand'
             ? data.inhoud.split('\n').map(t => ({ tekst: t, type: 'gelijk' }))
             : null;
+        // Alleen het losse bekijk-venster toont markeringen; de -a/-b-panelen van de extensie-vergelijking hebben hun eigen
+        // regel-voor-regel-vergelijking.
+        const metMarkering = data.type === 'bestand' && viewerId === 'bekijk-viewer'
+            && Array.isArray(data.markeringen) && data.markeringen.length > 0;
         viewer.innerHTML = '<div class="viewer">'
             + '<div class="kop"><strong>👁️ ' + escapeHtml(pad) + bronTekst + '</strong><span>' + metaTekst + '</span></div>'
-            + '<pre>' + (regelsVoorWeergave ? renderGenummerdeRegels(regelsVoorWeergave) : escapeHtml(data.inhoud)) + '</pre>'
+            + (metMarkering ? codeLegendaHtml(data.markeringen) : '')
+            + '<pre>' + (metMarkering
+                ? renderCodeMetMarkeringen(data.inhoud, data.markeringen)
+                : (regelsVoorWeergave ? renderGenummerdeRegels(regelsVoorWeergave) : escapeHtml(data.inhoud))) + '</pre>'
             + '</div>';
 
         // Bijhouden voor de naast-elkaar-vergelijking: alleen relevant voor
@@ -1566,6 +1799,7 @@ function beheerActie(knop, actie, bevestigTekst) {
             alert('❌ ' + data.foutmelding);
             return;
         }
+        sluitViewerVoorPad(pad);
         rij.style.transition = 'opacity 0.3s';
         rij.style.opacity = '0';
         setTimeout(() => {
@@ -1713,6 +1947,7 @@ function bulkBekijken() {
     }
 
     const viewer = document.getElementById('bekijk-viewer');
+    delete viewer.dataset.pad; // een eventuele enkelvoudige weergave wordt hieronder vervangen door meerdere panelen
     viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>⏳ ' + checkboxes.length + ' item(s) laden...</strong></div></div>';
     viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -1742,16 +1977,27 @@ function bulkBekijken() {
                 : 'mapinhoud';
             return '<div class="viewer" style="margin-bottom: 10px;">'
                 + '<div class="kop"><strong>👁️ ' + escapeHtml(pad) + '</strong><span>' + metaTekst + '</span></div>'
-                + '<pre>' + escapeHtml(data.inhoud) + '</pre>'
+                + (data.type === 'bestand' && Array.isArray(data.markeringen) && data.markeringen.length > 0 ? codeLegendaHtml(data.markeringen) : '')
+                + '<pre>' + (data.type === 'bestand' && Array.isArray(data.markeringen) && data.markeringen.length > 0
+                    ? renderCodeMetMarkeringen(data.inhoud, data.markeringen)
+                    : escapeHtml(data.inhoud)) + '</pre>'
                 + '</div>';
         }).join('');
+
+        // Per paneel het bijbehorende pad onthouden (zie sluitViewerVoorPad()).
+        Array.from(viewer.children).forEach((paneel, i) => {
+            if (resultaten[i]) {
+                paneel.dataset.pad = resultaten[i].pad;
+            }
+        });
     });
 }
 
 function bulkActie(actie, bevestigTekst) {
-    const checkboxes = bulkGeselecteerd().filter(cb => cb.dataset.type !== 'database' && cb.dataset.type !== 'cluster');
+    // Kern-ingangsbestanden (index.php e.d.) blijven bewust buiten bulkacties: quarantaine/blokkeren/verwijderen legt de site plat.
+    const checkboxes = bulkGeselecteerd().filter(cb => cb.dataset.type !== 'database' && cb.dataset.type !== 'cluster' && cb.dataset.kernentree !== '1');
     if (checkboxes.length === 0) {
-        alert('Geen van de geselecteerde items ondersteunt deze actie (database-bevindingen los je op via Joomla Beheerder, verzamelmeldingen zijn niet als één geheel te verwijderen).');
+        alert('Geen van de geselecteerde items ondersteunt deze actie (Joomla-kernbestanden vervang je door het origineel, database-bevindingen los je op via Joomla Beheerder, verzamelmeldingen zijn niet als één geheel te verwijderen).');
         return;
     }
     if (!confirm('Weet je zeker dat je ' + bevestigTekst)) {
@@ -1790,6 +2036,7 @@ function bulkActie(actie, bevestigTekst) {
             .then(r => r.json())
             .then(data => {
                 if (data.succes) {
+                    sluitViewerVoorPad(pad);
                     rij.style.transition = 'opacity 0.3s';
                     rij.style.opacity = '0';
                     setTimeout(() => rij.remove(), 300);

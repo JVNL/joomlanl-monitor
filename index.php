@@ -677,6 +677,15 @@ function scanEnkeleSite(siteId, knop) {
                             return r.text();
                         })
                         .then(() => {
+                            melding.textContent = '⏳ Kernbestanden met het officiële Joomla-pakket vergelijken...';
+                            zetVoortgang(90);
+
+                            // Gebeurde tot nu toe alleen via de cronjob - na een herscan ontbrak de vergelijking dus, en
+                            // daarmee een afwijkend kernbestand (met de knop "Automatisch vervangen door origineel").
+                            // Een fout hier (bv. het pakket kon niet worden gedownload) mag de scan zelf niet laten mislukken.
+                            return fetch('vergelijk_kern_bestanden.php').then(r => r.text()).catch(() => '');
+                        })
+                        .then(() => {
                             melding.className = 'ok';
                             melding.textContent = '✅ Deze website is opnieuw gescand — pagina wordt herladen...';
                             zetVoortgang(100, true);
@@ -776,6 +785,15 @@ function scanEnCheckSites(knop) {
                         .then(r => {
                             if (!r.ok) throw new Error('HTTP ' + r.status);
                             return r.text();
+                        })
+                        .then(() => {
+                            melding.textContent = '⏳ Kernbestanden met het officiële Joomla-pakket vergelijken...';
+                            zetVoortgang(88);
+
+                            // Gebeurde tot nu toe alleen via de cronjob - na een herscan ontbrak de vergelijking dus, en
+                            // daarmee een afwijkend kernbestand (met de knop "Automatisch vervangen door origineel").
+                            // Een fout hier (bv. het pakket kon niet worden gedownload) mag de scan zelf niet laten mislukken.
+                            return fetch('vergelijk_kern_bestanden.php').then(r => r.text()).catch(() => '');
                         })
                         .then(() => {
                             melding.textContent = '⏳ Notificatie-e-mail controleren...';
@@ -1295,7 +1313,7 @@ if ($richting === 'omgekeerd') {
             <span class="rij-spinner" id="spinner-<?php echo (int) $site['id']; ?>" title="Bezig met scannen..." style="display: none;">⏳</span>
             <button type="button" class="knop-icoon knop-ververs-icoon" onclick="scanEnkeleSite(<?php echo (int) $site['id']; ?>, this)" title="Alleen deze website opnieuw scannen">↻</button>
             <a class="knop-icoon" href="site_instellingen.php?site_id=<?php echo (int) $site['id']; ?>" title="Site-instellingen"><span class="icoon-glyph">⚙️</span></a>
-            <a class="knop-icoon" href="<?php echo htmlspecialchars(bepaalSiteUrl($site, bepaalScanBestandsnaam($site))); ?>" target="_blank" rel="noopener" title="Scanscript rechtstreeks openen"><span class="icoon-glyph">📋</span></a>
+            <a class="knop-icoon" href="<?php echo htmlspecialchars(bepaalVerseScanUrl($site, bepaalScanBestandsnaam($site))); ?>" data-basis="<?php echo htmlspecialchars(bepaalSiteUrl($site, bepaalScanBestandsnaam($site))); ?>" onmousedown="this.href = this.dataset.basis + '?nc=' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);" target="_blank" rel="noopener" title="Scanscript rechtstreeks openen (altijd een verse scan, nooit een oude uitvoer uit een cache)"><span class="icoon-glyph">📋</span></a>
             <?php if ($ftpClientUrl !== null): ?>
             <a class="knop-icoon" href="<?php echo htmlspecialchars($ftpClientUrl); ?>"
                 <?php if ($ftpGebruikersnaamKopieren !== null): ?>

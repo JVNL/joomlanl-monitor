@@ -456,6 +456,11 @@ function herscanDezeSite(knop) {
                             return r.text();
                         })
                         .then(() => {
+                            melding.textContent = '⏳ Kernbestanden met het officiële Joomla-pakket vergelijken...';
+                            // Gebeurde tot nu toe alleen via de cronjob; een fout hier mag de herscan niet laten mislukken.
+                            return fetch('vergelijk_kern_bestanden.php').then(r => r.text()).catch(() => '');
+                        })
+                        .then(() => {
                             melding.style.background = '#d4edda';
                             melding.style.color = '#155724';
                             melding.textContent = '✅ Deze website is opnieuw gescand — pagina wordt herladen...';

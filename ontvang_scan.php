@@ -13,6 +13,13 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 header('Content-Type: text/plain; charset=utf-8');
 
+// De verwerking hieronder kan bij een grote site (honderden extensieregels en duizenden bestand-hashes)
+// langer duren dan de tijd die het scanscript op de site op het antwoord wacht. Zonder deze regels kan de
+// webserver dit script halverwege afbreken zodra die verbinding wegvalt - met een half bijgewerkte site
+// als gevolg (bijvoorbeeld een lege extensielijst, terwijl de rest van het resultaat al was opgeslagen).
+ignore_user_abort(true);
+@set_time_limit(300);
+
 require_once 'config.php';
 require_once 'versie_vergelijk_functies.php';
 require_once 'instellingen_functies.php';
@@ -177,6 +184,14 @@ if (array_key_exists('super_users', $data) || array_key_exists('super_users_fout
 // --------------------------------------------------------------------
 
 if ($siteId) {
+    // Alles hieronder (extensies, catalogus, bestand-hashes) in ÉÉN transactie:
+    //  - atomair: er ontstaat nooit meer een site met een leeggehaalde extensielijst of half vervangen
+    //    hashes doordat de verwerking halverwege stopt - bij een fout wordt alles teruggedraaid en blijft
+    //    de vorige, complete stand staan;
+    //  - veel sneller: duizenden losse INSERTs met een eigen commit per stuk (elk een schijfschrijfactie)
+    //    worden nu in één keer weggeschreven.
+    $pdo->beginTransaction();
+
     $extensieFout = $data['extensies_fout'] ?? null;
 
     $extensiesUpdateStmt = $pdo->prepare("
@@ -489,4 +504,6 @@ if ($siteId) {
             echo "\nOK: $aantalHashesOpgeslagen extensiebestand-hash(es) opgeslagen voor $domeinVoorVergelijk.";
         }
     }
+
+    $pdo->commit();
 }

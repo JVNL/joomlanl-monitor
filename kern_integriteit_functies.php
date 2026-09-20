@@ -69,6 +69,61 @@ function isEchtKernPad(string $pad): bool
 }
 
 /**
+ * Downloadt het officiële Joomla-pakket (Full Package .zip) van downloads.joomla.org naar een tijdelijk bestand.
+ *
+ * De bestandsnaam staat op downloads.joomla.org met STREEPJES in het versienummer, bijvoorbeeld
+ * Joomla_3-10-12-Stable-Full_Package.zip en Joomla_5-3-3-Stable-Full_Package.zip (zie de "Download now"-
+ * knop op https://downloads.joomla.org/cms/joomla3/3-10-12). Hier werd tot nu toe een naam met PUNTEN
+ * geprobeerd (Joomla_3.10.12-...), die dus niet overeenkomt met de officiële link. Daarom nu eerst de
+ * officiële naam, en pas daarna de oude variant als terugval. Zonder pakket is er geen vergelijking met het
+ * origineel mogelijk, en ontbreken dus ook de afwijkingen én de knop "Automatisch vervangen door origineel".
+ *
+ * @param string $basisUrl alleen aan te passen om te kunnen testen
+ * @return array{ok: bool, pad: ?string, foutmelding: ?string} pad = tijdelijk .zip-bestand (door de aanroeper op te ruimen)
+ */
+function downloadOfficieelJoomlaPakket(string $kernversie, string $basisUrl = 'https://downloads.joomla.org'): array
+{
+    $major = strtok($kernversie, '.');
+    $slug = str_replace('.', '-', $kernversie);
+    $bestandsnamen = [
+        "Joomla_{$slug}-Stable-Full_Package.zip",        // zoals downloads.joomla.org de link zelf noemt
+        "Joomla_{$kernversie}-Stable-Full_Package.zip",  // eerdere schrijfwijze, als terugval
+    ];
+
+    $fouten = [];
+    foreach ($bestandsnamen as $bestandsnaam) {
+        $url = "{$basisUrl}/cms/joomla{$major}/{$slug}/{$bestandsnaam}?format=zip";
+
+        $basis = tempnam(sys_get_temp_dir(), 'joomla_officieel_');
+        $tmpBestand = $basis . '.zip';
+        @unlink($basis); // tempnam() maakt zelf al een leeg bestand aan; dat blijft anders achter
+
+        $ch = curl_init($url);
+        $fh = fopen($tmpBestand, 'wb');
+        curl_setopt_array($ch, [
+            CURLOPT_FILE => $fh,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_TIMEOUT => 180,
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+        $gelukt = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlFout = curl_error($ch);
+        curl_close($ch);
+        fclose($fh);
+
+        if ($gelukt && $httpCode === 200 && filesize($tmpBestand) >= 100000) {
+            return ['ok' => true, 'pad' => $tmpBestand, 'foutmelding' => null];
+        }
+
+        @unlink($tmpBestand);
+        $fouten[] = $bestandsnaam . ': ' . ($curlFout ?: "HTTP $httpCode");
+    }
+
+    return ['ok' => false, 'pad' => null, 'foutmelding' => implode(' | ', $fouten)];
+}
+
+/**
  * Bouwt (indien nog niet aanwezig) de officiële hash-tabel voor een
  * Joomla-kernversie op, en geeft 'm terug als [relatief_pad => hash].
  * Downloadt het officiële pakket hoogstens één keer per versie - een
@@ -91,31 +146,11 @@ function haalOfficieleKernHashes(PDO $pdo, string $kernversie): array
     }
 
     // Nog niet eerder gezien voor deze versie - eenmalig ophalen en cachen.
-    $major = strtok($kernversie, '.');
-    $slug = str_replace('.', '-', $kernversie);
-    $url = "https://downloads.joomla.org/cms/joomla{$major}/{$slug}/Joomla_{$kernversie}-Stable-Full_Package.zip?format=zip";
-
-    $tmpBestand = tempnam(sys_get_temp_dir(), 'joomla_officieel_') . '.zip';
-
-    $ch = curl_init($url);
-    $fh = fopen($tmpBestand, 'wb');
-    curl_setopt_array($ch, [
-        CURLOPT_FILE => $fh,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 180,
-        CURLOPT_SSL_VERIFYPEER => true,
-    ]);
-    $gelukt = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlFout = curl_error($ch);
-    curl_close($ch);
-    fclose($fh);
-
-    if (!$gelukt || $httpCode !== 200 || filesize($tmpBestand) < 100000) {
-        @unlink($tmpBestand);
-        $reden = $curlFout ?: "HTTP $httpCode";
-        return ['ok' => false, 'hashes' => [], 'foutmelding' => "Kon officieel Joomla $kernversie pakket niet downloaden: $reden"];
+    $download = downloadOfficieelJoomlaPakket($kernversie);
+    if (!$download['ok']) {
+        return ['ok' => false, 'hashes' => [], 'foutmelding' => "Kon officieel Joomla $kernversie pakket niet downloaden: {$download['foutmelding']}"];
     }
+    $tmpBestand = $download['pad'];
 
     $zip = new ZipArchive();
     if ($zip->open($tmpBestand) !== true) {
@@ -282,31 +317,12 @@ function haalOfficieelBestandInhoud(string $kernversie, string $relatiefPad, boo
         return $leeg;
     }
 
-    $major = strtok($kernversie, '.');
-    $slug = str_replace('.', '-', $kernversie);
-    $url = "https://downloads.joomla.org/cms/joomla{$major}/{$slug}/Joomla_{$kernversie}-Stable-Full_Package.zip?format=zip";
-
-    $tmpBestand = tempnam(sys_get_temp_dir(), 'joomla_officieel_') . '.zip';
-
-    $ch = curl_init($url);
-    $fh = fopen($tmpBestand, 'wb');
-    curl_setopt_array($ch, [
-        CURLOPT_FILE => $fh,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 180,
-        CURLOPT_SSL_VERIFYPEER => true,
-    ]);
-    $gelukt = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlFout = curl_error($ch);
-    curl_close($ch);
-    fclose($fh);
-
-    if (!$gelukt || $httpCode !== 200 || filesize($tmpBestand) < 100000) {
-        @unlink($tmpBestand);
-        $leeg['foutmelding'] = "Kon officieel Joomla $kernversie pakket niet downloaden: " . ($curlFout ?: "HTTP $httpCode");
+    $download = downloadOfficieelJoomlaPakket($kernversie);
+    if (!$download['ok']) {
+        $leeg['foutmelding'] = "Kon officieel Joomla $kernversie pakket niet downloaden: {$download['foutmelding']}";
         return $leeg;
     }
+    $tmpBestand = $download['pad'];
 
     $zip = new ZipArchive();
     if ($zip->open($tmpBestand) !== true) {

@@ -344,6 +344,24 @@ function bepaalSiteUrl(array $site, string $pad = ''): string
 }
 
 /**
+ * URL van het scanscript voor een GET-aanroep (een scan starten, of het scanscript rechtstreeks openen),
+ * met een unieke "ververs-code" erachter (?nc=...). Twee redenen:
+ *  - een URL die elke keer anders is, wordt niet uit een cache van de browser, een CDN (Cloudflare) of de
+ *    paginacache van de hostingpartij (LiteSpeed/Varnish/nginx) gehaald: het scanscript draait dan echt;
+ *  - het scanscript echoot de code terug ("Ververs-code: ..."), zodat start_scan.php kan controleren dat
+ *    het antwoord van een nu uitgevoerde scan komt en niet van een oud moment.
+ * Het scanscript zelf negeert de parameter verder volledig.
+ *
+ * @param string $verversCode wordt gevuld met de gebruikte code (om later te kunnen controleren)
+ */
+function bepaalVerseScanUrl(array $site, string $bestandsnaam, string &$verversCode = ''): string
+{
+    $verversCode = bin2hex(random_bytes(6));
+
+    return bepaalSiteUrl($site, $bestandsnaam) . '?nc=' . $verversCode;
+}
+
+/**
  * Slaat één instelling op (voegt toe of werkt bij).
  */
 function slaInstellingOp(PDO $pdo, string $sleutel, string $waarde): void

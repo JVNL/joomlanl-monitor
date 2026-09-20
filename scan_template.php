@@ -40,6 +40,19 @@ ini_set('display_errors', 1);
 // getoond, nooit uitgevoerd.
 header('Content-Type: text/plain; charset=utf-8');
 
+// Dit script moet bij ÉLK verzoek echt draaien: het antwoord is per definitie een momentopname (de actuele
+// scan, of het resultaat van een beheeractie). Cache-lagen tussen de monitor en dit bestand - de browser,
+// een CDN als Cloudflare, of de paginacache van de hostingpartij (LiteSpeed, Varnish, nginx) - mogen dat
+// antwoord dus nooit bewaren en opnieuw uitleveren: dan draait er niets, toont de scanuitvoer steeds een
+// oud moment en komt er geen nieuw resultaat bij de monitor aan. (Ontdekt bij metius.nl: na meerdere
+// herscans toonde het 📋-icoontje steeds de uitvoer van 17:00.) De laatste twee headers zijn specifiek voor
+// LiteSpeed en nginx en doen verder niets op andere servers.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('X-LiteSpeed-Cache-Control: no-cache');
+header('X-Accel-Expires: 0');
+
 $geheimeCode = '__GEHEIME_CODE__';
 // realpath() erbij: __DIR__ alleen volstaat niet als er ergens in het pad
 // (bijv. /home/gebruikersnaam zelf) een symlink zit - dan zou __DIR__ een
@@ -154,7 +167,10 @@ function detecteerCloakingInKernbestand($inhoud)
 
     return 'CLOAKING-VERDACHT: bot-detectie (' . implode(', ', $gevondenBot)
         . ') + extern-content-ophalen (' . implode(', ', $gevondenExtern) . ') in hetzelfde kernbestand - '
-        . 'kenmerkend voor een aanval die andere inhoud toont aan zoekmachines dan aan bezoekers';
+        . 'kenmerkend voor een aanval die andere inhoud toont aan zoekmachines dan aan bezoekers. '
+        . 'HERSTEL: vervang dit kernbestand door het officiële exemplaar (sectie "Kernbestanden" onderaan het rapport, knop '
+        . '"Automatisch vervangen door origineel"; verschijnt na een herscan). Verwijder of blokkeer het niet: dan valt de site uit. '
+        . 'Zoek daarna ook in andere bestanden naar dezelfde code.';
 }
 
 // ----------------------------------------------------------------------
@@ -187,7 +203,11 @@ function vindMassaleHernoeming($startMap, &$rootUnknown)
         }
 
         $pad = $itemInfo->getPathname();
-        if (preg_match('#[/\\\\](cache|logs?|__MACOSX|tmp)[/\\\\]#i', $pad)) {
+        // _scan_beheer = de eigen quarantaine/prullenbak van dit systeem. Verplaatste bestanden krijgen daar
+        // de naam "<datum_tijd_id>__<oorspronkelijke naam>" - tien verwijderde bestanden met dezelfde
+        // oorspronkelijke naam (bv. de proefbestanden "s1784789290.gif" van een aanvaller) leken dan op een
+        // hernoemaanval met het achtervoegsel "__s1784789290" en gaven een valse melding met risico 95.
+        if (preg_match('#[/\\\\](cache|logs?|__MACOSX|tmp|_scan_beheer)[/\\\\]#i', $pad)) {
             continue;
         }
 
@@ -918,6 +938,8 @@ if (isset($_POST['actie']) && in_array($_POST['actie'], $beheerActies, true)) {
             'inhoud' => ($inhoud === false) ? '(kon bestand niet lezen)' : $inhoud,
             'afgekapt' => $grootte > $max,
             'grootte' => $grootte,
+            // Regels die opvallen, met uitleg per regel - de monitor markeert die in de weergave (zwart op geel).
+            'markeringen' => ($inhoud === false) ? [] : bepaalVerdachteRegels($inhoud),
         ], JSON_INVALID_UTF8_SUBSTITUTE);
         exit;
     }
@@ -1294,6 +1316,7 @@ function bepaalRisico(string $reden): int
         'BACKDOOR PATROON'         => 90,
         'OBFUSCATED FUNCTION CALL' => 70,
         'KRITIEK'                  => 75,
+        'LOS PHP-BESTAND IN VERDUBBELDE MAP' => 80,
         'Verdubbelde mapnaam'      => 65,
         'VERDACHT'                 => 55,
     ];
@@ -1482,6 +1505,431 @@ function checkKernIntegriteit(string $inhoud): ?string
     return null;
 }
 
+/**
+ * Herkent de "anti-spam e-mailencoder": PHP-code die een e-mailadres tijdens
+ * de uitvoering zelf omzet naar %XX-tekens en dat als document.write(unescape(...))
+ * naar de browser stuurt, zodat spam-harvesters het adres niet in de bron zien.
+ * Standaardtechniek in template-engines en Composer-libraries (Smarty's
+ * {mailto}, en soortgelijke helpers in andere libraries).
+ *
+ * Dit is een POSITIEVE herkenning op inhoud - geen uitsluiting op pad of
+ * bestandsnaam. Een bestand dat hieraan niet voldoet wordt gewoon gemeld, en
+ * een aanvaller kan er dus geen blinde vlek mee creëren door een bestand
+ * onder een bekend pad neer te zetten: de inhoud moet zelf aantoonbaar de
+ * onschuldige vorm hebben. PATROON 20 blijft daardoor voor élke andere vorm
+ * van document.write(unescape(...)) volledig actief.
+ *
+ * Alle vier voorwaarden moeten kloppen (anders: false = gewoon melden):
+ *  1. Elke document.write(unescape(...))-aanroep krijgt als argument een door
+ *     PHP zelf ingevoegde variabele (bv. '...unescape(\'' . $js_encode . '\')')
+ *     - dus geen letterlijke, vooraf versleutelde payload in de bron.
+ *  2. Die variabele wordt in hetzelfde bestand opgebouwd door zelf %XX-tekens
+ *     te genereren ($var .= '%' . bin2hex(...) of dechex(...)) - precies wat
+ *     een encoder doet, en niet wat een payload-houder doet.
+ *  3. Nergens in het bestand staat een aaneengesloten reeks van 8+ letterlijke
+ *     %XX-/%uXXXX-tekens (kenmerk van een ingebakken injectie-payload).
+ *  4. Het bestand leest geen $_GET/$_POST/$_REQUEST/$_COOKIE en bevat geen
+ *     eval()/assert()/base64_decode()/gzinflate()/gzuncompress()/str_rot13()
+ *     - de routes waarlangs bezoekersinvoer of verstopte code in zo'n
+ *     variabele zou kunnen belanden.
+ */
+function isPhpZijdigeUnescapeEncoder(string $inhoud): bool
+{
+    $aantalAanroepen = preg_match_all('/document\.write\s*\(\s*unescape\s*\(/i', $inhoud);
+    if ($aantalAanroepen === 0) {
+        return false;
+    }
+
+    // Voorwaarde 1: elk argument is een door PHP ingevoegde variabele (niet
+    // beginnend met "_", dus nooit $_GET e.d. / $GLOBALS).
+    $aantalIngevoegd = preg_match_all(
+        '/document\.write\s*\(\s*unescape\s*\(\s*\\\\?[\'"](?:\s*[\'"])?\s*(?:\.\s*)?\{?\$([a-z]\w*)/i',
+        $inhoud,
+        $treffers
+    );
+    if ($aantalIngevoegd !== $aantalAanroepen) {
+        return false;
+    }
+
+    // Voorwaarde 2: elke ingevoegde variabele wordt door dit bestand zelf als %XX-reeks opgebouwd.
+    foreach (array_unique($treffers[1]) as $variabele) {
+        $encoderPatroon = '/\$' . preg_quote($variabele, '/') . '\s*\.=\s*[\'"]%[\'"]\s*\.\s*(?:bin2hex|dechex)\s*\(/i';
+        if (!preg_match($encoderPatroon, $inhoud)) {
+            return false;
+        }
+    }
+
+    // Voorwaarde 3: geen ingebakken, vooraf versleutelde payload.
+    if (preg_match('/(?:%(?:u[0-9a-f]{4}|[0-9a-f]{2})){8,}/i', $inhoud)) {
+        return false;
+    }
+
+    // Voorwaarde 4: geen bezoekersinvoer en geen verstopte/uitvoerbare code.
+    if (preg_match('/\$_(?:GET|POST|REQUEST|COOKIE)\b/i', $inhoud)
+        || preg_match('/\b(?:eval|assert|base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(/i', $inhoud)) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Geeft de PHP-code terug ZONDER commentaar (// # en /* *\/ /** *\/), zodat een patroon dat op een uitvoerbare
+ * CONSTRUCTIE zoekt (bv. een aanroep van create_function()) niet aanslaat op een woord in een opmerking.
+ * Voorbeelden uit de praktijk: Smarty's modifier.capitalize.php noemt create_function() alleen in een
+ * bugnotitie in de commentaarkop, en phpQuery beschrijft in een docblock "$_SERVER['HTTP_HOST'] (if any)" -
+ * beide zijn daardoor als backdoor gemeld.
+ *
+ * Veilig tegen omzeiling: commentaar wordt nooit uitgevoerd, dus een aanvaller kan er geen werkende code in
+ * verstoppen; er wordt gesplitst met PHP's eigen tokenizer (dus precies zoals PHP zelf commentaar herkent,
+ * ook rond "?>" en in strings/heredocs). Alleen het commentaar zelf verdwijnt: strings, inline HTML en code
+ * blijven staan. Is de tokenizer-extensie niet beschikbaar, dan komt de oorspronkelijke tekst ongewijzigd
+ * terug (dan gedraagt de scan zich als voorheen).
+ */
+/**
+ * Voegt meldingen over HETZELFDE bestand samen tot één vondst. Meerdere onafhankelijke controles kunnen hetzelfde
+ * bestand melden: een inhoudspatroon (backdoor-lijst, naam "/index.php"), de cloaking-controle op kernbestanden
+ * (root-level lijst, naam "index.php", zonder slash) en checkKernIntegriteit(). Dat gaf drie rijen voor één bestand
+ * (metius.nl, index.php), waarbij een actie op de ene rij de andere niet meenam.
+ *  - dubbele backdoor-vondsten met dezelfde (genormaliseerde) naam: één rij, alle redenen achter elkaar, hoogste risico;
+ *  - een root-level "bestand"-melding over een bestand dat al als backdoor is gemeld: de reden gaat naar die vondst.
+ * Een root-level melding over een bestand dat verder nergens is gemeld (bv. alleen de cloaking-controle) blijft staan.
+ */
+function normaliseerVondstNaam(string $naam): string
+{
+    return '/' . ltrim(str_replace('\\', '/', $naam), '/');
+}
+
+function voegDubbeleVondstenSamen(array &$backdoorVondsten, array &$rootLevelUnknown): void
+{
+    $uniek = [];
+    $positie = [];
+    foreach ($backdoorVondsten as $vondst) {
+        $sleutel = normaliseerVondstNaam((string) ($vondst['naam'] ?? ''));
+        if (!isset($positie[$sleutel])) {
+            $positie[$sleutel] = count($uniek);
+            $uniek[] = $vondst;
+            continue;
+        }
+        $i = $positie[$sleutel];
+        if (strpos((string) $uniek[$i]['reden'], (string) $vondst['reden']) === false) {
+            $uniek[$i]['reden'] .= ' || ' . $vondst['reden'];
+        }
+        $uniek[$i]['risico'] = max((int) ($uniek[$i]['risico'] ?? 0), (int) ($vondst['risico'] ?? 0));
+    }
+
+    $overig = [];
+    foreach ($rootLevelUnknown as $melding) {
+        $sleutel = normaliseerVondstNaam((string) ($melding['naam'] ?? ''));
+        if (($melding['type'] ?? '') === 'bestand' && isset($positie[$sleutel])) {
+            $i = $positie[$sleutel];
+            $extra = (string) ($melding['reden_override'] ?? '');
+            if ($extra !== '' && strpos((string) $uniek[$i]['reden'], $extra) === false) {
+                $uniek[$i]['reden'] .= ' || ' . $extra;
+            }
+            $uniek[$i]['risico'] = max((int) ($uniek[$i]['risico'] ?? 0), (int) ($melding['risico'] ?? 0));
+            continue;
+        }
+        $overig[] = $melding;
+    }
+
+    $backdoorVondsten = $uniek;
+    $rootLevelUnknown = $overig;
+}
+
+/**
+ * Detecteert eval()/assert() die code uitvoert die uit het verzoek komt ($_REQUEST/$_POST/$_GET/$_COOKIE) - direct,
+ * of via tussenvariabelen (bv. $a = $_REQUEST["x"]; $a = ontsleutel($a, $sleutel); eval($a);). Dat is een
+ * "remote code execution"-achterdeur: iedereen die de URL kent, kan willekeurige PHP laten uitvoeren.
+ *
+ * Bestaande patronen zochten naar vaste vormen (eval(base64_decode(...)), een specifieke XOR-lus). Deze controle
+ * volgt in plaats daarvan de gegevensstroom: welke variabelen worden (indirect) uit het verzoek gevuld, en wordt zo'n
+ * variabele aan eval()/assert() gegeven? Een "versleutel"-stap ertussen (bv. tweemaal XOR met dezelfde sleutel, wat de
+ * invoer gewoon teruggeeft) helpt de aanvaller dan niet meer. Gevonden bij metius.nl (september 2026):
+ * administrator/modules/mod_version/mod_version/index.php, met ?jack=<php-code>, ontsnapte aan alle inhoudspatronen.
+ *
+ * Commentaar wordt genegeerd (zie verwijderPhpCommentaar()). Bewust conservatief: alleen variabelen die daadwerkelijk aan
+ * eval()/assert() worden doorgegeven, en alleen invoer uit de vier verzoek-superglobals.
+ */
+function detecteerEvalOpVerzoekinvoer(string $inhoud): ?string
+{
+    // Goedkoop voorfilter: zonder eval/assert én een verzoek-superglobal is er niets te volgen.
+    if (!preg_match('/\b(?:eval|assert)\s*\(/i', $inhoud) || !preg_match('/\$_(?:REQUEST|POST|GET|COOKIE)\b/i', $inhoud)) {
+        return null;
+    }
+
+    $code = verwijderPhpCommentaar($inhoud);
+    $bron = '\$_(?:REQUEST|POST|GET|COOKIE)\b';
+
+    $melding = 'EVAL OP VERZOEKINVOER - eval()/assert() voert code uit die (direct, of via tussenvariabelen en een "versleutel"-stap) uit '
+        . '$_REQUEST/$_POST/$_GET/$_COOKIE komt: iedereen die de URL kent kan willekeurige PHP-code laten uitvoeren, ZEKER BACKDOOR';
+
+    // 1. Rechtstreeks: eval( ... $_POST[...] ... ) binnen één opdracht.
+    if (preg_match('/\b(?:eval|assert)\s*\(\s*@?[^;]{0,200}?' . $bron . '/i', $code)) {
+        return $melding;
+    }
+
+    // 2. Via variabelen: eerst alles verzamelen wat (indirect) uit het verzoek komt.
+    $besmet = [];
+    if (preg_match_all('/foreach\s*\(\s*' . $bron . '\s+as\s+(?:\$\w+\s*=>\s*)?\$(\w+)/i', $code, $lussen)) {
+        foreach ($lussen[1] as $naam) {
+            $besmet[$naam] = true;
+        }
+    }
+    preg_match_all('/\$(\w+)\s*\.?=(?!=)([^;]*);/s', $code, $toewijzingen, PREG_SET_ORDER);
+    for ($ronde = 0; $ronde < 8; $ronde++) {
+        $veranderd = false;
+        foreach ($toewijzingen as $t) {
+            $naam = $t[1];
+            if (isset($besmet[$naam])) {
+                continue;
+            }
+            $isBesmet = (bool) preg_match('/' . $bron . '/i', $t[2]);
+            if (!$isBesmet && preg_match_all('/\$(\w+)/', $t[2], $gebruikt)) {
+                foreach ($gebruikt[1] as $gebruiktNaam) {
+                    if (isset($besmet[$gebruiktNaam])) {
+                        $isBesmet = true;
+                        break;
+                    }
+                }
+            }
+            if ($isBesmet) {
+                $besmet[$naam] = true;
+                $veranderd = true;
+            }
+        }
+        if (!$veranderd) {
+            break;
+        }
+    }
+
+    // 3. Wordt zo'n variabele aan eval()/assert() gegeven?
+    if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)/i', $code, $aanroepen)) {
+        foreach ($aanroepen[1] as $naam) {
+            if (isset($besmet[$naam])) {
+                return $melding;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Geeft de PHP-code terug zonder commentaar, maar MET behoud van alle regeleinden, zodat regelnummers overeen
+ * blijven komen met het oorspronkelijke bestand (zie bepaalVerdachteRegels()). Zonder tokenizer: ongewijzigd.
+ */
+function maskeerPhpCommentaar(string $inhoud): string
+{
+    if (!function_exists('token_get_all')) {
+        return $inhoud;
+    }
+
+    $uit = '';
+    foreach (@token_get_all($inhoud) as $token) {
+        if (is_array($token)) {
+            if ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+                $uit .= str_repeat("\n", substr_count($token[1], "\n"));
+                continue;
+            }
+            $uit .= $token[1];
+        } else {
+            $uit .= $token;
+        }
+    }
+
+    return $uit;
+}
+
+/**
+ * Bepaalt welke REGELS van een bestand opvallen en legt per regel in gewoon Nederlands uit waarom. Bedoeld voor de
+ * "Bekijk"-weergave op de monitor, zodat ook iemand zonder PHP-kennis ziet waar in de code de achterdeur zit.
+ *
+ * Twee niveaus: "hoog" (de kern van een achterdeur: code uitvoeren, een opdracht op de server draaien, een geüpload
+ * bestand opslaan, en de regels waarlangs invoer van de bezoeker bij zo'n eval() terechtkomt) en "letop" (een
+ * aanwijzing die op zichzelf ook in gewone code voorkomt: invoer van de bezoeker lezen, tekst omzetten, gegevens bij een
+ * andere server ophalen). Dit is een automatische aanwijzing en geen oordeel: legitieme code kan ook markeringen krijgen.
+ *
+ * @return array<int, array{regel:int, ernst:string, uitleg:string}> op regelnummer gesorteerd, hoogstens 300
+ */
+function bepaalVerdachteRegels(string $inhoud): array
+{
+    if (strpos($inhoud, '<?') === false) {
+        return [];
+    }
+
+    $code = maskeerPhpCommentaar($inhoud);
+    $bron = '\$_(?:REQUEST|POST|GET|COOKIE)\b';
+    $markeringen = [];
+
+    $markeer = function (int $regel, string $ernst, string $uitleg) use (&$markeringen) {
+        if (!isset($markeringen[$regel])) {
+            $markeringen[$regel] = ['regel' => $regel, 'ernst' => $ernst, 'uitleg' => $uitleg];
+            return;
+        }
+        if ($ernst === 'hoog') {
+            $markeringen[$regel]['ernst'] = 'hoog';
+        }
+        if (strpos($markeringen[$regel]['uitleg'], $uitleg) === false && strlen($markeringen[$regel]['uitleg']) < 420) {
+            $markeringen[$regel]['uitleg'] .= ' ' . $uitleg;
+        }
+    };
+
+    // ---- 1. Per regel: constructies die bij achterdeuren horen.
+    $regelRegels = [
+        ['/\beval\s*\(/i', 'hoog', 'eval() voert tekst uit als PHP-code. Vrijwel altijd een teken van een achterdeur.'],
+        ['/\bassert\s*\(\s*[@$]/i', 'hoog', 'assert() met een variabele kan, net als eval(), tekst als code uitvoeren.'],
+        ['/\b(?:system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(/i', 'hoog', 'Voert een opdracht uit op de server zelf.'],
+        ['/\bmove_uploaded_file\s*\(/i', 'hoog', 'Slaat een door de bezoeker geüpload bestand op de server op.'],
+        ['/\bfile_put_contents\s*\([^;]{0,200}' . $bron . '/i', 'hoog', 'Schrijft gegevens van de bezoeker naar een bestand: zo kan een aanvaller zelf bestanden aanmaken of aanpassen.'],
+        ['/\b(?:include|require)(?:_once)?\s*\(?\s*' . $bron . '/i', 'hoog', 'Laadt een bestand dat de bezoeker zelf opgeeft.'],
+        ['/\bmd5\s*\(\s*\$_(?:REQUEST|POST|GET)/i', 'hoog', 'Controleert een wachtwoord dat de bezoeker meestuurt: een verborgen "inlog" voor een aanvaller.'],
+        ['/NOPQRSTUVWXYZABCDEFGHIJKLM/', 'hoog', 'ROT13-tabel: wordt gebruikt om een adres of tekst onleesbaar te maken.'],
+        ['/\b(?:file_put_contents|fopen)\s*\(\s*\$\w+/i', 'letop', 'Schrijft naar een bestand waarvan de naam in een variabele staat (vaak door de bezoeker bepaald).'],
+        ['/\b(?:base64_decode|gzinflate|gzuncompress|str_rot13|convert_uudecode)\s*\(/i', 'letop', 'Zet verborgen (versleutelde of samengeperste) tekst weer om. Wordt vaak gebruikt om schadelijke code te verstoppen.'],
+        ['/\b(?:curl_exec|fsockopen)\s*\(|\bfile_get_contents\s*\(\s*[\'"]?https?:/i', 'letop', 'Haalt gegevens op bij een andere server.'],
+        ['/' . $bron . '/i', 'letop', 'Leest gegevens die de bezoeker meestuurt. Een aanvaller kan hiermee opdrachten geven.'],
+        ['/\$\$\w+\s*\(/', 'letop', 'Roept een functie aan waarvan de naam in een variabele staat. Dat verbergt wat er gebeurt.'],
+        ['/\bcreate_function\s*\(/i', 'letop', 'Maakt een functie van tekst (een oude manier om code uit tekst uit te voeren).'],
+        ['/document\.write\s*\(\s*unescape/i', 'letop', 'Schrijft (verborgen) JavaScript naar de pagina. Bekend van spam-injecties, maar ook van e-mailverbergers.'],
+        ['/googlebot|bingbot/i', 'letop', 'Kijkt of de bezoeker een zoekmachine is. Bekend van "cloaking": zoekmachines iets anders tonen dan mensen.'],
+    ];
+    foreach (explode("\n", $code) as $i => $tekst) {
+        if (trim($tekst) === '') {
+            continue;
+        }
+        foreach ($regelRegels as $r) {
+            if (preg_match($r[0], $tekst)) {
+                $markeer($i + 1, $r[1], $r[2]);
+            }
+        }
+    }
+
+    // ---- 2. De gegevensstroom: hoe komt invoer van de bezoeker bij een eval()/assert() terecht?
+    $regelVan = function (int $offset) use ($code) {
+        return substr_count($code, "\n", 0, $offset) + 1;
+    };
+    $toewijzingen = [];
+    if (preg_match_all('/\$(\w+)\s*\.?=(?!=)([^;]*);/s', $code, $t, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        foreach ($t as $x) {
+            $toewijzingen[] = ['naam' => $x[1][0], 'rhs' => $x[2][0], 'regel' => $regelVan($x[0][1])];
+        }
+    }
+    $besmet = [];
+    $lusRegel = [];
+    if (preg_match_all('/foreach\s*\(\s*' . $bron . '\s+as\s+(?:\$\w+\s*=>\s*)?\$(\w+)/i', $code, $l, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        foreach ($l as $x) {
+            $besmet[$x[1][0]] = true;
+            $lusRegel[$x[1][0]] = $regelVan($x[0][1]);
+        }
+    }
+    for ($ronde = 0; $ronde < 8; $ronde++) {
+        $veranderd = false;
+        foreach ($toewijzingen as $a) {
+            if (isset($besmet[$a['naam']])) {
+                continue;
+            }
+            $isBesmet = (bool) preg_match('/' . $bron . '/i', $a['rhs']);
+            if (!$isBesmet && preg_match_all('/\$(\w+)/', $a['rhs'], $gebruikt)) {
+                foreach ($gebruikt[1] as $g) {
+                    if (isset($besmet[$g])) {
+                        $isBesmet = true;
+                        break;
+                    }
+                }
+            }
+            if ($isBesmet) {
+                $besmet[$a['naam']] = true;
+                $veranderd = true;
+            }
+        }
+        if (!$veranderd) {
+            break;
+        }
+    }
+    if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)/i', $code, $ev, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $werk = [];
+        foreach ($ev as $x) {
+            $naam = $x[1][0];
+            if (!isset($besmet[$naam])) {
+                continue;
+            }
+            $markeer($regelVan($x[0][1]), 'hoog', 'Hier wordt $' . $naam . ' uitgevoerd als PHP-code - en de inhoud komt van de bezoeker. '
+                . 'Dit is de achterdeur: wie de URL kent, kan hier eigen code laten uitvoeren.');
+            $werk[] = $naam;
+        }
+        $gezien = [];
+        while ($werk) {
+            $v = array_pop($werk);
+            if (isset($gezien[$v])) {
+                continue;
+            }
+            $gezien[$v] = true;
+            if (isset($lusRegel[$v])) {
+                $markeer($lusRegel[$v], 'hoog', 'Hier wordt $' . $v . ' gevuld met invoer van de bezoeker.');
+            }
+            foreach ($toewijzingen as $a) {
+                if ($a['naam'] !== $v) {
+                    continue;
+                }
+                $direct = (bool) preg_match('/' . $bron . '/i', $a['rhs']);
+                $markeer($a['regel'], 'hoog', $direct
+                    ? 'Hier komt invoer van de bezoeker binnen (in $' . $v . ').'
+                    : '$' . $v . ' wordt hier afgeleid van de invoer van de bezoeker (vaak een bewerking of "versleuteling" om het te verbergen).');
+                if (preg_match_all('/\$(\w+)/', $a['rhs'], $deps)) {
+                    foreach ($deps[1] as $d) {
+                        if (isset($besmet[$d])) {
+                            $werk[] = $d;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ksort($markeringen);
+
+    return array_slice(array_values($markeringen), 0, 300);
+}
+
+/**
+ * True als $map niets anders bevat dan het opgegeven PHP-bestand (eventueel met een index.html en/of
+ * .htaccess ernaast). Bij een lees-/scanfout: false (dan geen extra melding).
+ */
+function isLosPhpBestandInMap(string $map, string $bestandpad): bool
+{
+    $lijst = @scandir($map);
+    if ($lijst === false) {
+        return false;
+    }
+
+    $overig = array_diff($lijst, ['.', '..', 'index.html', '.htaccess', basename($bestandpad)]);
+
+    return count($overig) === 0;
+}
+
+function verwijderPhpCommentaar(string $inhoud): string
+{
+    if (!function_exists('token_get_all')) {
+        return $inhoud;
+    }
+
+    $uit = '';
+    foreach (@token_get_all($inhoud) as $token) {
+        if (is_array($token)) {
+            if ($token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+                $uit .= ' '; // een spatie, zodat de tekst rondom het commentaar niet aan elkaar plakt
+                continue;
+            }
+            $uit .= $token[1];
+        } else {
+            $uit .= $token;
+        }
+    }
+
+    return $uit;
+}
+
 function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $ignoreerBestanden = [])
 {
     $bestandsnaam = basename($bestandpad);
@@ -1579,16 +2027,22 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
     // PATROON 9: Dynamische array-functieaanroep ($p[7](), $arr[$i]()) i.c.m. superglobal
     // Vangt het "image.18.php"-cookie-loader patroon: functienamen zitten
     // niet als tekst in het bestand, maar worden runtime opgebouwd/aangeroepen.
-    if (!$verdacht && preg_match('/\$\w+\s*\[\s*[\'"]?\w*[\'"]?\s*\]\s*\(/', $inhoud)) {
-        // Let op: ook detecteren als de superglobal eerst aan een losse
-        // variabele wordt toegekend (bv. $c = $_COOKIE; ... $c[11] ...),
-        // vandaar geen verplichte '[' direct na de superglobal-naam.
-        if (preg_match('/\$_(COOKIE|REQUEST|POST|GET|SERVER)\b/i', $inhoud)) {
-            // extra check: include/require/move_uploaded_file/fwrite/fopen in de buurt
-            // verhoogt de kans dat dit een loader is i.p.v. legitiem array-gebruik
-            if (preg_match('/\b(include|require|include_once|require_once|fwrite|fopen|move_uploaded_file)\b/i', $inhoud)) {
-                $reden = 'Dynamische array/variabele functie-aanroep i.c.m. superglobal en include/fwrite/fopen - COOKIE/REQUEST LOADER PATROON';
-                $verdacht = true;
+    if (!$verdacht && preg_match('/\$\w+\s*\[\s*[\'"]?\w*[\'"]?\s*\]\s*(?:\(|\/\*|\/\/|#)/', $inhoud)) {
+        // Voorfilter (goedkoop): ook een commentaar tussen ] en ( laten we door - de echte controle
+        // gebeurt hieronder op de code zónder commentaar. Alleen kijken naar uitvoerbare code: een opmerking als "$_SERVER['HTTP_HOST'] (if any)" in
+        // een docblock (phpQuery) lijkt anders op een dynamische aanroep. Zie verwijderPhpCommentaar().
+        $code9 = verwijderPhpCommentaar($inhoud);
+        if (preg_match('/\$\w+\s*\[\s*[\'"]?\w*[\'"]?\s*\]\s*\(/', $code9)) {
+            // Let op: ook detecteren als de superglobal eerst aan een losse
+            // variabele wordt toegekend (bv. $c = $_COOKIE; ... $c[11] ...),
+            // vandaar geen verplichte '[' direct na de superglobal-naam.
+            if (preg_match('/\$_(COOKIE|REQUEST|POST|GET|SERVER)\b/i', $code9)) {
+                // extra check: include/require/move_uploaded_file/fwrite/fopen in de buurt
+                // verhoogt de kans dat dit een loader is i.p.v. legitiem array-gebruik
+                if (preg_match('/\b(include|require|include_once|require_once|fwrite|fopen|move_uploaded_file)\b/i', $code9)) {
+                    $reden = 'Dynamische array/variabele functie-aanroep i.c.m. superglobal en include/fwrite/fopen - COOKIE/REQUEST LOADER PATROON';
+                    $verdacht = true;
+                }
             }
         }
     }
@@ -1679,12 +2133,18 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
     // zichzelf geen backdoor. Alleen flaggen bij onvertrouwde input in
     // hetzelfde bestand, of bij een verdacht klein bestand (grote libraries
     // zoals geshi.php zijn typisch tientallen tot honderden KB's groot).
-    if (!$verdacht && preg_match('/create_function\s*\(/i', $inhoud)) {
-        $isKleinBestand = strlen($inhoud) < 5000;
-        $heeftSuperglobal = preg_match('/\$_(COOKIE|REQUEST|POST|GET|SERVER)\b/i', $inhoud);
-        if ($isKleinBestand || $heeftSuperglobal) {
-            $reden = 'create_function() gebruikt i.c.m. superglobal-input of in klein bestand - vaak misbruikt als eval()-vervanger, VERDACHT';
-            $verdacht = true;
+    if (!$verdacht && preg_match('/create_function\s*(?:\(|\/\*|\/\/|#)/i', $inhoud)) {
+        // Voorfilter (goedkoop): een commentaar tussen de naam en ( laten we ook door. Alleen een échte aanroep telt, niet het woord in een opmerking: Smarty's modifier.capitalize.php
+        // noemt create_function() alleen in een bugnotitie in de commentaarkop en werd daardoor ten
+        // onrechte als backdoor gemeld. Zie verwijderPhpCommentaar().
+        $code12 = verwijderPhpCommentaar($inhoud);
+        if (preg_match('/create_function\s*\(/i', $code12)) {
+            $isKleinBestand = strlen($inhoud) < 5000;
+            $heeftSuperglobal = preg_match('/\$_(COOKIE|REQUEST|POST|GET|SERVER)\b/i', $code12);
+            if ($isKleinBestand || $heeftSuperglobal) {
+                $reden = 'create_function() gebruikt i.c.m. superglobal-input of in klein bestand - vaak misbruikt als eval()-vervanger, VERDACHT';
+                $verdacht = true;
+            }
         }
     }
 
@@ -1723,6 +2183,31 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
                 if (!$verdacht) {
                     $reden = 'Verdubbelde mapnaam (map "' . $ouderMapNaam . '" zit direct in een map die ook "' . $ouderMapNaam . '" heet) - '
                         . 'komt in een schone Joomla-installatie nooit voor, typisch patroon voor automatisch geplaatste backdoors (bv. models/models, views/views)';
+                    $verdacht = true;
+                }
+            } elseif (strtolower(basename($bestandpad)) === 'index.php' && isLosPhpBestandInMap($ouderMap, $bestandpad)) {
+                // Verdubbelde mapnaam, óók bij een niet-generieke naam, MAAR de map bevat verder niets dan
+                // één bestand met de naam index.php. Een aanvaller maakt een verse, lege map met dezelfde naam
+                // aan en zet daar alleen zijn eigen index.php in (het bestand dat er als een onschuldige
+                // "index"-placeholder uitziet). Ontdekt bij metius.nl (september 2026): dertien van zulke
+                // bestanden (o.a. modules/mod_search/tmpl/tmpl/index.php, bestaat nergens in Joomla) bleven als
+                // "ter info" staan, terwijl ze exact dezelfde wijzigingstijden hadden als de al bevestigde
+                // webshells uit dezelfde aanvalsgolf.
+                //
+                // BEWUST ALLEEN index.php: een eerste versie van deze regel meldde elk enkel PHP-bestand in een
+                // verdubbelde map, en gaf daarmee een valse melding op iCagenda (hoezer.nl), dat elke class in
+                // een eigen map met dezelfde naam zet (administrator/components/com_icagenda/src/Utilities/
+                // Utilities/Utilities.php, namespace iCutilities\Utilities). Dat is een gangbare PSR-4-achtige
+                // indeling (map = klassenaam, bestand = klassenaam.php), dus een enkel bestand in een
+                // verdubbelde map zegt op zichzelf niets. Alle dertien aangetroffen aanvallersbestanden heetten
+                // index.php; andere bestandsnamen blijven "ter info", zoals voorheen.
+                $meldingLos = 'LOS PHP-BESTAND IN VERDUBBELDE MAP - map "' . $ouderMapNaam . '" zit direct in een map die ook "' . $ouderMapNaam
+                    . '" heet en bevat verder niets dan dit ene index.php-bestand. Een index.php als enige inhoud van een dubbel genoemde map is het '
+                    . 'typische patroon van een door een aanvaller aangemaakte schuilplaats, VERDACHT';
+                if ($verdacht) {
+                    $reden .= ' [+ ' . $meldingLos . ']';
+                } else {
+                    $reden = $meldingLos;
                     $verdacht = true;
                 }
             } else {
@@ -1848,7 +2333,15 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
     // dit patroon zich op ingebedde HTML/JS-payload, die bij een defacement
     // vaak gewoon in een bestaand .php-bestand wordt geplakt in plaats van
     // als los bestand te worden neergezet.
-    if (!$verdacht && preg_match('/document\.write\s*\(\s*unescape\s*\(/i', $inhoud)) {
+    //
+    // UITZONDERING (september 2026, Smarty's {mailto} in com_eventgallery en
+    // in elke andere extensie die Smarty meelevert): document.write(unescape(...))
+    // is ook de standaardmanier waarop PHP-libraries e-mailadressen tegen
+    // spam-harvesters verbergen. Zie isPhpZijdigeUnescapeEncoder() - die
+    // herkent die onschuldige vorm op INHOUD (niet op pad), zodat het bestand
+    // gewoon gescand blijft en een aanvaller er geen blinde vlek mee krijgt.
+    if (!$verdacht && preg_match('/document\.write\s*\(\s*unescape\s*\(/i', $inhoud)
+        && !isPhpZijdigeUnescapeEncoder($inhoud)) {
         $reden = 'document.write(unescape(...)) - obfuscated JavaScript-injectie, BACKDOOR PATROON';
         $verdacht = true;
     }
@@ -1946,6 +2439,45 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
             $reden = 'str_rot13() + eval() in hetzelfde bestand - vrijwel geen legitiem gebruik in Joomla-extensies, sterk verdacht op verborgen payload';
         }
         $verdacht = true;
+    }
+
+    // PATROON 24: verborgen bestemmings-URL via de ROT13-tabel + een externe aanvraag. De code bevat de letter-
+    // vertaaltabel van ROT13 ("NOPQRSTUVWXYZABCDEFGHIJKLM...") als tekst, gebruikt die met strtr() om een versleutelde
+    // URL te ontsleutelen, en haalt daarmee inhoud van een externe server op (curl/file_get_contents) om die aan
+    // zoekmachines/bezoekers te tonen. Kenmerk van cloaking-/spam-injecties in Joomla-index.php-bestanden (de
+    // "2DUAN"-familie, aangetroffen bij metius.nl, september 2026: de URL stond als "%34%31%35%35%2D%72%61..." in de
+    // code). Beide onderdelen samen komen in legitieme code vrijwel nooit voor.
+    if (!$verdacht && strpos($inhoud, 'NOPQRSTUVWXYZABCDEFGHIJKLM') !== false
+        && preg_match('/\bstrtr\s*\(/i', $inhoud)
+        && (preg_match('/\b(curl_exec|fsockopen)\s*\(/i', $inhoud)
+            || (preg_match('/\bfile_get_contents\s*\(/i', $inhoud) && strpos($inhoud, '://') !== false))) {
+        $reden = 'Versleutelde bestemming: ROT13-vertaaltabel met strtr() i.c.m. een externe aanvraag (curl/file_get_contents) - de URL van de externe server is verborgen in de code, typisch voor cloaking-/spam-injecties, BACKDOOR PATROON';
+        $verdacht = true;
+    }
+
+    // PATROON 25: wachtwoord-hash-beveiligde bestandsschrijver: md5() van een verzoekparameter wordt vergeleken met een
+    // vaste hash, en daarna wordt een bestand geschreven waarvan de NAAM ook uit het verzoek komt (fopen($var) + fwrite).
+    // Dat is de verborgen achterdeur die bij dezelfde injectie hoorde (?pwd=...&gv=<bestandsnaam>): wie het wachtwoord
+    // kent, kan bestanden aanmaken - en omdat de inhoud de naam bevat, ook een PHP-bestand.
+    if (!$verdacht && preg_match('/md5\s*\(\s*\$_(REQUEST|POST|GET)\s*\[[^\]]+\]\s*\)/i', $inhoud)
+        && preg_match('/==\s*[\'"][0-9a-f]{32}[\'"]/i', $inhoud)
+        && preg_match('/fopen\s*\(\s*\$\w+/i', $inhoud)
+        && preg_match('/fwrite\s*\(/i', $inhoud)) {
+        $reden = 'Wachtwoord-hash (md5 van een verzoekparameter vergeleken met een vaste hash) i.c.m. een bestand schrijven met een naam uit het verzoek - verborgen bestandsschrijver, UPLOAD BACKDOOR PATROON';
+        $verdacht = true;
+    }
+
+    // PATROON 26: eval()/assert() op invoer uit het verzoek - ook via tussenvariabelen en een "versleutel"-stap.
+    // Wordt óók uitgevoerd als het bestand al door een ander patroon (bv. de locatie) is gemeld: de inhoudelijke reden
+    // hoort er dan bij, want dat is het bewijs dat het echt een achterdeur is en niet alleen een verdachte plek.
+    $evalMelding = detecteerEvalOpVerzoekinvoer($inhoud);
+    if ($evalMelding !== null) {
+        if ($verdacht) {
+            $reden .= ' [+ ' . $evalMelding . ']';
+        } else {
+            $reden = $evalMelding;
+            $verdacht = true;
+        }
     }
 
     if ($verdacht) {
@@ -2288,40 +2820,62 @@ function scanNietPhpBestandOpVerstopteCode($bestandpad, &$backdoorVondsten, &$mo
 
 /**
  * Bekende, legitieme third-party libraries die door hun programmeerstijl
- * (dynamische functie-aanroepen i.c.m. bestandsfuncties) regelmatig als
- * valse-positief backdoor worden herkend. Uitsluiting gebeurt bewust op
- * basis van het VOLLEDIGE relatieve pad (niet alleen de bestandsnaam) -
- * een backdoor die toevallig dezelfde bestandsnaam gebruikt maar ergens
- * anders staat, wordt dus gewoon nog steeds gemeld.
+ * (dynamische functie-aanroepen i.c.m. bestandsfuncties, create_function())
+ * regelmatig als valse-positief backdoor worden herkend.
+ *
+ * Uitsluiting gebeurt op INHOUD, niet op pad: een bestand wordt alleen
+ * overgeslagen als de SHA-256 van zijn inhoud exact overeenkomt met een
+ * vastgelegde, gecontroleerde variant van dat bestand. Een pad- of
+ * bestandsnaam-uitsluiting zou een blinde vlek zijn - een aanvaller kan onder
+ * hetzelfde pad een backdoor neerzetten en die wordt dan nooit meer gescand.
+ * Hier valt een gewijzigd bestand direct weer onder de gewone scan, en een
+ * identiek exemplaar op een andere plek (bv. dezelfde library in een andere
+ * extensie) wordt juist wél herkend.
+ *
+ * Regeleinden worden voor de hash genormaliseerd (\r\n => \n), zodat een
+ * CRLF- en een LF-variant van hetzelfde bestand dezelfde vingerafdruk hebben.
+ * Zelf de hash bepalen: tr -d '\r' < bestand.php | sha256sum
+ *
+ * Nieuwe variant toevoegen: eerst de inhoud controleren (bv. vergelijken met
+ * de officiële release) en bij de juiste bestandsnaam de hash + een korte
+ * herkomst/toelichting zetten. Bestandsnaam staat er alleen bij om niet elk
+ * PHP-bestand te hoeven hashen; de hash bepaalt de uitkomst.
+ *
+ * Eerder hier (verwijderd, augustus/september 2026):
+ *  - Smarty's {mailto}: herkent PATROON 20 nu zelf op inhoud
+ *    (isPhpZijdigeUnescapeEncoder()).
+ *  - RegularLabs helpers/assignments/php.php: bestaat niet meer in de
+ *    huidige Regular Labs Library (src/Php.php, die schoon scant).
  */
 function isBekendeLegitiemeLibrary(string $volledigPad, string $startMap): bool
 {
-    $relatiefPad = str_replace('\\', '/', str_replace($startMap, '', $volledigPad));
-
-    $bekendePatronen = [
-        '#/com_rsseo/helpers/phpQuery\.php$#i',
-        // RegularLabs' gedeelde "assignments"-helper (gebruikt door o.a.
-        // Sourcerer, DPCalendar en andere RegularLabs-extensies) gebruikt
-        // create_function() als callback-mechanisme - door Wouter zelf
-        // gecontroleerd en bevestigd als legitiem (augustus 2026).
-        '#/libraries/regularlabs/helpers/assignments/php\.php$#i',
-        // Smarty's ingebouwde {mailto}-functie (meegeleverd als Composer-
-        // dependency door extensies die Smarty als template-engine
-        // gebruiken, bv. com_eventgallery) gebruikt bewust
-        // document.write(unescape(...)) om e-mailadressen te verbergen
-        // voor spam-harvesters - een bekende, legitieme anti-spamtechniek,
-        // geen JS-injectie. Triggerde PATROON 20 (bmwcruiser.nl, augustus
-        // 2026).
-        '#/vendor/smarty/smarty/src/FunctionHandler/Mailto\.php$#i',
+    // bestandsnaam (kleine letters) => [ sha256 => herkomst ]
+    static $bekendeBestanden = [
+        'phpquery.php' => [
+            '1bda9c57c8ab6ac65fd125a1d71abc0d062a5b6a25e520ee276f701f02194d93'
+                => 'phpQuery 0.9.5 (one-file-build, plus PHP 8-compatibiliteitspatches), meegeleverd door com_rsseo',
+        ],
     ];
 
-    foreach ($bekendePatronen as $patroon) {
-        if (preg_match($patroon, $relatiefPad)) {
-            return true;
-        }
+    $bestandsnaam = strtolower(basename(str_replace('\\', '/', $volledigPad)));
+    if (!isset($bekendeBestanden[$bestandsnaam])) {
+        return false;
     }
 
-    return false;
+    // Niet uitleesbaar of onverwacht groot: nooit blind overslaan.
+    $grootte = @filesize($volledigPad);
+    if ($grootte === false || $grootte > 2 * 1024 * 1024 || !is_readable($volledigPad)) {
+        return false;
+    }
+
+    $inhoud = @file_get_contents($volledigPad);
+    if ($inhoud === false) {
+        return false;
+    }
+
+    $hash = hash('sha256', str_replace("\r\n", "\n", $inhoud));
+
+    return isset($bekendeBestanden[$bestandsnaam][$hash]);
 }
 
 /**
@@ -2950,7 +3504,11 @@ function haalUrlEenvoudig($url, $timeoutSeconden = 8)
         CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         CURLOPT_ENCODING       => '', // laat curl gzip/deflate/br automatisch decomprimeren
-        CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_2TLS, // moderne browsers gebruiken vrijwel altijd HTTP/2
+        // CURL_HTTP_VERSION_2TLS bestaat pas vanaf libcurl 7.47 (PHP 7.0.7). Op oudere
+        // servers (bv. CentOS 7) is de constante niet gedefinieerd en gaf elke aanroep hier een
+        // "Use of undefined constant"-waarschuwing (in PHP 8 een fatale fout) - dan gewoon de
+        // standaardinstelling van curl gebruiken.
+        CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_NONE, // moderne browsers gebruiken vrijwel altijd HTTP/2
         CURLOPT_COOKIEJAR      => '',
         CURLOPT_COOKIEFILE     => '',
         CURLOPT_HTTPHEADER     => [
@@ -3021,7 +3579,7 @@ function haalUrlsParallelEenvoudig(array $urls, int $timeoutSeconden = 10): arra
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             CURLOPT_ENCODING       => '',
-            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_2TLS,
+            CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_NONE, // zie de toelichting bij haalUrlEenvoudig()
             CURLOPT_COOKIEJAR      => '',
             CURLOPT_COOKIEFILE     => '',
             CURLOPT_HTTPHEADER     => [
@@ -3846,7 +4404,7 @@ if ($ditIsEenZelfherhaling) {
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_HTTPHEADER => ['X-Monitor-Zelf-Herhaling: 1'],
+            CURLOPT_HTTPHEADER => ['X-Monitor-Zelf-Herhaling: 1', 'Cache-Control: no-cache', 'Pragma: no-cache'],
         ];
 
         // Was het oorspronkelijke verzoek een POST (bv. een beheeractie
@@ -3884,7 +4442,17 @@ if ($ditIsEenZelfherhaling) {
 
 echo "=== JOOMLA BACKDOOR-SCAN (v10) ===\n";
 echo "Domein: " . $domein . "\n";
+// De map die daadwerkelijk wordt gescand (kanoniek pad). Alle paden in de
+// resultaten (bv. "/images/foto.gif") zijn relatief aan deze map - handig om te
+// controleren of je via FTP wel in dezelfde map kijkt als waar de scan draait.
+echo "Scanmap: " . $startMap . "\n";
 echo "Start: " . date('Y-m-d H:i:s') . "\n";
+// De monitor stuurt bij elke aanroep een unieke code mee (?nc=...) en controleert dat die hier terugkomt:
+// alleen dan is dit antwoord echt door een nu uitgevoerde scan geschreven, en niet uit een cache gehaald.
+$verversCode = isset($_GET['nc']) ? substr(preg_replace('/[^A-Za-z0-9]/', '', (string) $_GET['nc']), 0, 32) : '';
+if ($verversCode !== '') {
+    echo "Ververs-code: " . $verversCode . "\n";
+}
 
 // Vóór het eigenlijke scannen begint: de tmp-map alvast automatisch legen.
 // Deze map is vaak juist de plek waar kortstondige, verdachte bestanden
@@ -4177,6 +4745,9 @@ foreach ($kernEntryPoints as $relEntry) {
     }
 }
 
+// Meldingen over hetzelfde bestand (inhoudspatroon, cloaking, kernintegriteit) tot één vondst samenvoegen.
+voegDubbeleVondstenSamen($backdoorVondsten, $rootLevelUnknown);
+
 // Database-gebaseerde checks (verdachte Super Users, ontmaskeringsteksten in
 // templatestijlen) - gebruikt configuration.php voor een eigen, alleen-lezen
 // databaseverbinding. Wordt netjes overgeslagen als dat om wat voor reden
@@ -4336,22 +4907,79 @@ $payload = [
 
 echo "=== MONITOR ===\n";
 
-$ch = curl_init('__MONITOR_BASIS_URL__/ontvang_scan.php');
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($payload),
-    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-    CURLOPT_TIMEOUT => 15,
-    CURLOPT_SSL_VERIFYPEER => false,
-]);
+/**
+ * Stuurt één keer het scanresultaat (JSON) naar de monitor en geeft naast het
+ * antwoord ook de technische details terug (curl-fout, HTTP-code, tijdsduur,
+ * aantal verzonden bytes) - zodat een mislukte verzending niet meer alleen als
+ * "curl-fout" te zien is, maar ook WAAROM.
+ *
+ * - "Expect:" leeg: curl stuurt bij een grote POST standaard eerst
+ *   "Expect: 100-continue" en wacht dan op toestemming. Sommige proxy's/firewalls
+ *   beantwoorden dat nooit, met een time-out of afgebroken verbinding tot gevolg.
+ * - HTTP/1.1 expliciet: het scanresultaat is een enkele, grote POST - HTTP/2 heeft
+ *   daar geen voordeel en is bij oude libcurl-versies een extra bron van problemen.
+ */
+function stuurScanresultaatNaarMonitor(string $json, int $maxSeconden): array
+{
+    $ch = curl_init('__MONITOR_BASIS_URL__/ontvang_scan.php');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $json,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Expect:'],
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT => $maxSeconden,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
 
-$antwoord = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
+    $antwoord = curl_exec($ch);
+    $resultaat = [
+        'antwoord' => $antwoord,
+        'errno' => curl_errno($ch),
+        'fout' => curl_error($ch),
+        'http' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+        'seconden' => round((float) curl_getinfo($ch, CURLINFO_TOTAL_TIME), 1),
+    ];
+    curl_close($ch);
+
+    return $resultaat;
+}
+
+// json_encode() geeft false (en dus een LEGE POST-body, met een verwarrende
+// "ongeldige geheime code" van de monitor als gevolg) zodra één bestandsnaam of
+// foutmelding ongeldige UTF-8 bevat - bij aangevallen sites niet ondenkbaar, want
+// aanvallers geven bestanden nogal eens rare namen. Ongeldige bytes worden dan
+// vervangen in plaats van het hele resultaat te verliezen.
+$jsonOpties = defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0;
+$payloadJson = json_encode($payload, $jsonOpties);
+if ($payloadJson === false) {
+    echo "⚠️  Scanresultaat kon niet volledig als JSON worden opgebouwd (" . json_last_error_msg() . ") - verzonden met gedeeltelijke inhoud.\n";
+    $payloadJson = json_encode($payload, $jsonOpties | JSON_PARTIAL_OUTPUT_ON_ERROR);
+}
+echo "Resultaat: " . number_format(strlen((string) $payloadJson) / 1024, 0, ',', '.') . " KB\n";
+
+// Tijdsbudget: de monitor moet bij een grote site honderden extensies en
+// duizenden bestand-hashes verwerken - dat duurt langer dan de 15 seconden die
+// hier voorheen als vaste limiet stonden. Bij een mislukte verzending één
+// nieuwe poging, zolang er nog ruim tijd over is.
+$verstrekenSindsStart = time() - $startTime;
+$eersteTimeout = max(20, min(60, 100 - $verstrekenSindsStart));
+$monitorPoging = stuurScanresultaatNaarMonitor((string) $payloadJson, $eersteTimeout);
+
+if ($monitorPoging['antwoord'] === false && (time() - $startTime) < 95) {
+    echo "⚠️  Verzenden mislukt (curl-fout {$monitorPoging['errno']}: {$monitorPoging['fout']}, na {$monitorPoging['seconden']} s) - nieuwe poging...\n";
+    sleep(2);
+    $tweedeTimeout = max(20, min(40, 110 - (time() - $startTime)));
+    $monitorPoging = stuurScanresultaatNaarMonitor((string) $payloadJson, $tweedeTimeout);
+}
+
+$antwoord = $monitorPoging['antwoord'];
+$httpCode = $monitorPoging['http'];
 
 if ($antwoord === false) {
-    echo "❌ FOUT: kon monitor niet bereiken (curl-fout)\n";
+    echo "❌ FOUT: kon monitor niet bereiken (curl-fout {$monitorPoging['errno']}: {$monitorPoging['fout']}, na {$monitorPoging['seconden']} s)\n";
+    echo "    Het scanresultaat is dus NIET aangekomen - de monitor toont nog de gegevens van de vorige geslaagde scan.\n";
 } elseif ($httpCode !== 200) {
     echo "❌ FOUT: monitor gaf HTTP {$httpCode} terug\n";
     echo "    Antwoord: {$antwoord}\n";

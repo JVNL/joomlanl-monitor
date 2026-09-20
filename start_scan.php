@@ -34,10 +34,78 @@ require_once 'config.php';
 require_once 'endpoint_beveiliging.php';
 require_once 'instellingen_functies.php';
 
+// Alleen-status-modus (gebruikt door beveiliging.php bij "Herscan alleen deze website"): geeft
+// terug wanneer het meest recente scanresultaat van deze site BIJ DE MONITOR is aangekomen, zonder
+// een scan te starten. Zo kan de pagina wachten tot er echt een NIEUW resultaat is, in plaats van
+// na een vaste wachttijd aan te nemen dat het gelukt is - het scanscript stuurt zijn uitkomst zelf
+// terug, en dat kan langer duren of mislukken. Toegang is al geregeld door endpoint_beveiliging.php
+// hierboven (ingelogde sessie of cron-code).
+if (isset($_GET['alleen_status'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    $statusStmt = $pdo->prepare("SELECT verdacht_laatste_scan FROM sites WHERE id = ?");
+    $statusStmt->execute([(int) ($_GET['site_id'] ?? 0)]);
+    $laatsteScanTijd = $statusStmt->fetchColumn();
+    echo json_encode(['laatste_scan' => ($laatsteScanTijd !== false && $laatsteScanTijd !== null) ? (string) $laatsteScanTijd : '']);
+    exit;
+}
+
 // We doen net alsof we een gewone browser zijn (Chrome), zodat
 // firewalls/security-plugins ons niet als "bot" blokkeren.
 const SCAN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     . '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+/**
+ * Herkent aan de responsheaders dat een antwoord uit een cache komt (browser-achtige headers doen er hier
+ * niet toe: dit is een server-naar-server-verzoek). Geeft een korte beschrijving terug, of null.
+ * $koppen: header-naam (kleine letters) => waarde.
+ */
+function bepaalCacheTrefferUitKoppen(array $koppen): ?string
+{
+    // Verschillende cache-lagen melden een treffer in hun eigen header (HIT/STALE/REVALIDATED...).
+    $cacheKoppen = ['x-cache', 'x-cache-status', 'x-proxy-cache', 'x-fastcgi-cache', 'x-nginx-cache',
+        'cf-cache-status', 'x-litespeed-cache', 'x-lsadc-cache', 'x-varnish-cache', 'x-sg-cache', 'x-cache-hit'];
+    foreach ($cacheKoppen as $naam) {
+        if (isset($koppen[$naam]) && preg_match('/\b(hit|stale|revalidated|updating)\b/i', $koppen[$naam])) {
+            return $naam . ': ' . $koppen[$naam];
+        }
+    }
+    // "Age" > 0: een tussenliggende cache heeft dit antwoord al een tijd vast.
+    if (isset($koppen['age']) && (int) $koppen['age'] > 0) {
+        return 'age: ' . $koppen['age'];
+    }
+    // Varnish: twee ids in X-Varnish = uit de cache geleverd.
+    if (isset($koppen['x-varnish']) && preg_match('/^\d+\s+\d+/', trim($koppen['x-varnish']))) {
+        return 'x-varnish: ' . $koppen['x-varnish'];
+    }
+
+    return null;
+}
+
+/**
+ * Controleert of het antwoord van het scanscript VERS is, dus echt door een nu uitgevoerde scan is
+ * geschreven, en niet uit een cache komt. Twee onafhankelijke aanwijzingen:
+ *  1. de responsheaders melden een cache-treffer (werkt ook bij een nog niet bijgewerkt scanscript);
+ *  2. een bijgewerkt scanscript ("Scanmap:" in de uitvoer) echoot altijd de meegestuurde ververs-code
+ *     terug ("Ververs-code: ..."); ontbreekt die, dan is dit een oud opgeslagen antwoord.
+ * Een ouder scanscript zonder beide kenmerken geeft geen melding (die werkt zichzelf bij zodra hij
+ * één keer echt draait) - er wordt alleen gewaarschuwd bij een aantoonbaar verouderd antwoord.
+ *
+ * @return string|null beschrijving van waaróm het antwoord verouderd lijkt, of null als het in orde is
+ */
+function bepaalVerouderdAntwoord(string $inhoud, string $verversCode, array $koppen): ?string
+{
+    $cacheTreffer = bepaalCacheTrefferUitKoppen($koppen);
+    if ($cacheTreffer !== null) {
+        return 'de cache van de site meldt een treffer: ' . $cacheTreffer;
+    }
+
+    $isBijgewerktScanscript = stripos($inhoud, 'Scanmap:') !== false || stripos($inhoud, 'Ververs-code:') !== false;
+    if ($isBijgewerktScanscript && $verversCode !== '' && strpos($inhoud, $verversCode) === false) {
+        return 'de meegestuurde ververs-code komt niet terug in de uitvoer';
+    }
+
+    return null;
+}
 
 /**
  * Start de scan op alle meegegeven sites tegelijk (parallel), en geeft per
@@ -62,14 +130,30 @@ function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden 
 {
     $multiHandle = curl_multi_init();
     $handles = [];
+    $verversCodes = [];
+    $antwoordKoppen = [];
 
     foreach ($sites as $index => $site) {
         $domein = $site['domein'];
         $bestandsnaam = bepaalScanBestandsnaam($site);
 
+        // Elke aanroep een unieke URL (?nc=...) en expliciet "niet uit een cache": anders kan een cache
+        // van de site (browser-achtig, Cloudflare, LiteSpeed/Varnish) een oud antwoord uitleveren, waarbij
+        // het scanscript helemaal niet draait - terwijl deze pagina dan toch "scan gestart" meldt.
+        $verversCode = '';
+        $antwoordKoppen[$index] = [];
+
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => bepaalSiteUrl($site, $bestandsnaam),
+            CURLOPT_URL => bepaalVerseScanUrl($site, $bestandsnaam, $verversCode),
+            CURLOPT_HTTPHEADER => ['Cache-Control: no-cache', 'Pragma: no-cache'],
+            CURLOPT_HEADERFUNCTION => function ($ch, $regel) use (&$antwoordKoppen, $index) {
+                $delen = explode(':', $regel, 2);
+                if (count($delen) === 2) {
+                    $antwoordKoppen[$index][strtolower(trim($delen[0]))] = trim($delen[1]);
+                }
+                return strlen($regel);
+            },
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS => 5,
@@ -81,6 +165,7 @@ function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden 
         ]);
         curl_multi_add_handle($multiHandle, $ch);
         $handles[$index] = $ch;
+        $verversCodes[$index] = $verversCode;
     }
 
     // Alle verzoeken tegelijk laten lopen totdat ze allemaal klaar zijn.
@@ -116,6 +201,14 @@ function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden 
             $resultaten[$index] = "$domein: ⚠️ Onverwachte inhoud ontvangen (geen scanresultaat herkend, ondanks HTTP $httpCode) - "
                 . "mogelijk stuurt een .htaccess-bestand in de hoofdmap van de site dit verzoek door naar iets anders. "
                 . "Controleer de .htaccess-bestanden handmatig via FTP.";
+        } elseif ($httpCode >= 200 && $httpCode < 300
+            && ($verouderdReden = bepaalVerouderdAntwoord((string) $inhoud, $verversCodes[$index] ?? '', $antwoordKoppen[$index] ?? [])) !== null) {
+            // Er kwam wél een scanuitvoer terug, maar een OUDE: het scanscript is niet echt uitgevoerd, dus
+            // er komt ook geen nieuw resultaat bij de monitor aan. Zonder deze controle werd dit als
+            // "gestart" gemeld en bleef het rapport ongemerkt de oude stand tonen.
+            $resultaten[$index] = "$domein: ⚠️ De site gaf een verouderd antwoord terug ($verouderdReden) - het scanscript is dus niet echt uitgevoerd "
+                . "en er komt geen nieuw scanresultaat. Waarschijnlijk houdt een cache (de hostingpartij, Cloudflare of LiteSpeed) het antwoord van deze URL vast. "
+                . "Sluit het scanscript uit van caching, of hernoem het via Site-instellingen: een nieuwe bestandsnaam is een nieuwe URL, zonder oude cache-invoer.";
         } else {
             $resultaten[$index] = "$domein: gestart (HTTP $httpCode)";
         }

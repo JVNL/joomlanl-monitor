@@ -1638,6 +1638,83 @@ function voegDubbeleVondstenSamen(array &$backdoorVondsten, array &$rootLevelUnk
 }
 
 /**
+ * Splitst PHP-code op in aparte "scopes": de body van elke functie/methode/closure als los blok,
+ * plus de rest (buiten elke functie) als laatste blok. Gebruikt om detecteerEvalOpVerzoekinvoer()
+ * per functie te laten kijken i.p.v. over het hele bestand heen - anders wordt een variabele die in
+ * functie A toevallig dezelfde naam heeft als een variabele in functie B (bijv. de veelgebruikte naam
+ * $value) tussen die twee functies "besmet", ook al hebben ze niets met elkaar te maken. Zonder
+ * tokenizer: het hele bestand als één blok (oud gedrag).
+ *
+ * @return string[] minstens 1 blok
+ */
+function splitsInFunctieBlokken(string $inhoud): array
+{
+    if (!function_exists('token_get_all')) {
+        return [$inhoud];
+    }
+
+    $tokens = @token_get_all($inhoud);
+    $n = count($tokens);
+    $blokken = [];
+    $globaal = '';
+
+    for ($i = 0; $i < $n; $i++) {
+        $tok = $tokens[$i];
+        if (is_array($tok) && $tok[0] === T_FUNCTION) {
+            // vind de '{' die de functiebody opent (of ';' bij een abstract/interface-methode zonder body)
+            $j = $i + 1;
+            $braceStart = null;
+            while ($j < $n) {
+                if ($tokens[$j] === '{') {
+                    $braceStart = $j;
+                    break;
+                }
+                if ($tokens[$j] === ';') {
+                    break;
+                }
+                $j++;
+            }
+            if ($braceStart === null) {
+                $globaal .= is_array($tok) ? $tok[1] : $tok;
+                continue;
+            }
+            // 'function naam(...)...' zelf (parameters/return-type) hoort niet écht tot de body,
+            // maar kan wel meegeteld worden bij "globaal" voor de zekerheid (kost niets, params bevatten
+            // zelden request-invoer of eval)
+            for ($k = $i; $k < $braceStart; $k++) {
+                $globaal .= is_array($tokens[$k]) ? $tokens[$k][1] : $tokens[$k];
+            }
+            // matchende '}' zoeken op accolade-diepte
+            $diepte = 0;
+            $body = '';
+            $eind = $braceStart;
+            for ($k = $braceStart; $k < $n; $k++) {
+                $t = $tokens[$k];
+                $tekst = is_array($t) ? $t[1] : $t;
+                if ($t === '{') {
+                    $diepte++;
+                } elseif ($t === '}') {
+                    $diepte--;
+                }
+                $body .= $tekst;
+                if ($diepte === 0) {
+                    $eind = $k;
+                    break;
+                }
+            }
+            $blokken[] = $body;
+            $i = $eind;
+            continue;
+        }
+        $globaal .= is_array($tok) ? $tok[1] : $tok;
+    }
+
+    $blokken[] = $globaal;
+
+    return $blokken;
+}
+
+/**
  * Detecteert eval()/assert() die code uitvoert die uit het verzoek komt ($_REQUEST/$_POST/$_GET/$_COOKIE) - direct,
  * of via tussenvariabelen (bv. $a = $_REQUEST["x"]; $a = ontsleutel($a, $sleutel); eval($a);). Dat is een
  * "remote code execution"-achterdeur: iedereen die de URL kent, kan willekeurige PHP laten uitvoeren.
@@ -1650,6 +1727,15 @@ function voegDubbeleVondstenSamen(array &$backdoorVondsten, array &$rootLevelUnk
  *
  * Commentaar wordt genegeerd (zie verwijderPhpCommentaar()). Bewust conservatief: alleen variabelen die daadwerkelijk aan
  * eval()/assert() worden doorgegeven, en alleen invoer uit de vier verzoek-superglobals.
+ *
+ * BELANGRIJK: de gegevensstroom wordt per FUNCTIE gevolgd (splitsInFunctieBlokken()), niet over het hele bestand
+ * heen. Reden: bij een eerdere, bestandsbrede versie werd bijv. RSForm! (com_rsform/helpers/rsform.php,
+ * controller.php) ten onrechte gemeld - de veelgebruikte parametervariabele $value wordt in de ene, geheel
+ * losstaande functie (formulierverwerking) gevuld vanuit $_POST, en in een compleet andere functie (het
+ * uitvoeren van een door de sitebeheerder zelf ingevoerde PHP-validatiesnippet, uit de database) toevallig ook
+ * $value genoemd en aan eval() gegeven - twee ongerelateerde variabelen met dezelfde naam, geen echte
+ * gegevensstroom. Per-functie scoping lost dit op zonder de echte detectie (alles binnen één functie, zoals bij
+ * mod_version) te verzwakken.
  */
 function detecteerEvalOpVerzoekinvoer(string $inhoud): ?string
 {
@@ -1664,50 +1750,57 @@ function detecteerEvalOpVerzoekinvoer(string $inhoud): ?string
     $melding = 'EVAL OP VERZOEKINVOER - eval()/assert() voert code uit die (direct, of via tussenvariabelen en een "versleutel"-stap) uit '
         . '$_REQUEST/$_POST/$_GET/$_COOKIE komt: iedereen die de URL kent kan willekeurige PHP-code laten uitvoeren, ZEKER BACKDOOR';
 
-    // 1. Rechtstreeks: eval( ... $_POST[...] ... ) binnen één opdracht.
-    if (preg_match('/\b(?:eval|assert)\s*\(\s*@?[^;]{0,200}?' . $bron . '/i', $code)) {
-        return $melding;
-    }
-
-    // 2. Via variabelen: eerst alles verzamelen wat (indirect) uit het verzoek komt.
-    $besmet = [];
-    if (preg_match_all('/foreach\s*\(\s*' . $bron . '\s+as\s+(?:\$\w+\s*=>\s*)?\$(\w+)/i', $code, $lussen)) {
-        foreach ($lussen[1] as $naam) {
-            $besmet[$naam] = true;
+    foreach (splitsInFunctieBlokken($code) as $blok) {
+        // Ook hier eerst het goedkope voorfilter, nu per blok: de meeste blokken bevatten geen eval/assert.
+        if (!preg_match('/\b(?:eval|assert)\s*\(/i', $blok)) {
+            continue;
         }
-    }
-    preg_match_all('/\$(\w+)\s*\.?=(?!=)([^;]*);/s', $code, $toewijzingen, PREG_SET_ORDER);
-    for ($ronde = 0; $ronde < 8; $ronde++) {
-        $veranderd = false;
-        foreach ($toewijzingen as $t) {
-            $naam = $t[1];
-            if (isset($besmet[$naam])) {
-                continue;
+
+        // 1. Rechtstreeks: eval( ... $_POST[...] ... ) binnen één opdracht.
+        if (preg_match('/\b(?:eval|assert)\s*\(\s*@?[^;]{0,200}?' . $bron . '/i', $blok)) {
+            return $melding;
+        }
+
+        // 2. Via variabelen: eerst alles verzamelen wat (indirect) uit het verzoek komt - BINNEN DIT BLOK.
+        $besmet = [];
+        if (preg_match_all('/foreach\s*\(\s*' . $bron . '\s+as\s+(?:\$\w+\s*=>\s*)?\$(\w+)/i', $blok, $lussen)) {
+            foreach ($lussen[1] as $naam) {
+                $besmet[$naam] = true;
             }
-            $isBesmet = (bool) preg_match('/' . $bron . '/i', $t[2]);
-            if (!$isBesmet && preg_match_all('/\$(\w+)/', $t[2], $gebruikt)) {
-                foreach ($gebruikt[1] as $gebruiktNaam) {
-                    if (isset($besmet[$gebruiktNaam])) {
-                        $isBesmet = true;
-                        break;
+        }
+        preg_match_all('/\$(\w+)\s*\.?=(?!=)([^;]*);/s', $blok, $toewijzingen, PREG_SET_ORDER);
+        for ($ronde = 0; $ronde < 8; $ronde++) {
+            $veranderd = false;
+            foreach ($toewijzingen as $t) {
+                $naam = $t[1];
+                if (isset($besmet[$naam])) {
+                    continue;
+                }
+                $isBesmet = (bool) preg_match('/' . $bron . '/i', $t[2]);
+                if (!$isBesmet && preg_match_all('/\$(\w+)/', $t[2], $gebruikt)) {
+                    foreach ($gebruikt[1] as $gebruiktNaam) {
+                        if (isset($besmet[$gebruiktNaam])) {
+                            $isBesmet = true;
+                            break;
+                        }
                     }
                 }
+                if ($isBesmet) {
+                    $besmet[$naam] = true;
+                    $veranderd = true;
+                }
             }
-            if ($isBesmet) {
-                $besmet[$naam] = true;
-                $veranderd = true;
+            if (!$veranderd) {
+                break;
             }
         }
-        if (!$veranderd) {
-            break;
-        }
-    }
 
-    // 3. Wordt zo'n variabele aan eval()/assert() gegeven?
-    if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)/i', $code, $aanroepen)) {
-        foreach ($aanroepen[1] as $naam) {
-            if (isset($besmet[$naam])) {
-                return $melding;
+        // 3. Wordt zo'n variabele aan eval()/assert() gegeven?
+        if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)/i', $blok, $aanroepen)) {
+            foreach ($aanroepen[1] as $naam) {
+                if (isset($besmet[$naam])) {
+                    return $melding;
+                }
             }
         }
     }

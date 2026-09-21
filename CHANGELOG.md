@@ -1,5 +1,12 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.24 - 2026-09-21
+
+### Bugfix: valse "ZEKER BACKDOOR"-melding op RSForm! (PATROON 26 keek over het hele bestand)
+Ontdekt kort na uitrol van 1.23: `administrator/components/com_rsform/helpers/rsform.php` en `components/com_rsform/controller.php` werden op meerdere sites gemeld als "EVAL OP VERZOEKINVOER - ZEKER BACKDOOR", terwijl dit gewoon de officiële RSForm!-bestanden zijn. Oorzaak: `detecteerEvalOpVerzoekinvoer()` (PATROON 26, zie 1.23 hieronder) volgde welke variabelen uit `$_REQUEST`/`$_POST`/`$_GET`/`$_COOKIE` komen en of zo'n variabele bij `eval()`/`assert()` terechtkomt, maar deed dat over het **hele bestand** in plaats van per functie. RSForm gebruikt de veelvoorkomende naam `$value` op twee geheel losstaande plekken in hetzelfde bestand: in de formulierverwerking wordt die gevuld vanuit `$_POST`, en in een heel andere functie (`isCode()`, die een door de sitebeheerder zelf ingevoerde PHP-validatiesnippet uit de database uitvoert) heet een lokale parameter toevallig ook `$value` en gaat naar `eval()`. Twee ongerelateerde variabelen met dezelfde naam werden zo als één gegevensstroom gezien.
+- Nieuwe helperfunctie `splitsInFunctieBlokken()` (op basis van `token_get_all()`, dezelfde tokenizer als `verwijderPhpCommentaar()`) splitst de code op in de body van elke functie/methode/closure, plus de rest daarbuiten als los blok. `detecteerEvalOpVerzoekinvoer()` volgt de gegevensstroom nu per blok in plaats van bestandsbreed.
+- Getest op 8 gevallen: het RSForm-patroon (nu schoon), de oorspronkelijke mod_version-achterdeur uit 1.23 (nog steeds gemeld, zowel binnen één functie als top-level zonder functie-wrapper), een rechtstreekse `eval($_GET[...])` binnen een functie, een achterdeur verstopt in een closure, een achterdeur via een `base64_decode()`-tussenstap - en twee losse legitieme gevallen (een vaste `eval()`-string naast onafhankelijk verzoekgebruik elders in het bestand; twee gelijknamige `$value`-variabelen die geen van beide met elkaar te maken hebben). Alle 8 gaven het verwachte resultaat.
+
 ## 1.23 - 2026-09-19
 
 ### Bugfix: het rapport toonde bestanden die al lang weg waren (scanresultaat kwam niet of half aan)

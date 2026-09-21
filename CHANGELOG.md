@@ -1,5 +1,13 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.25 - 2026-09-21
+
+### Bugfix: valse "ZEKER BACKDOOR"-melding op RSForm! (deel 2) - `components/com_rsform/controller.php`
+Na 1.24 bleef `components/com_rsform/controller.php` (i.t.t. `helpers/rsform.php`, die 1.24 al oploste) nog steeds gemeld worden. Broncode opgevraagd en nagelopen: in `ajaxValidate()` wordt `$form` (via `$formId`, via `$post`) uiteindelijk afgeleid van `$_POST['form']` - RSForm zet de opgeschoonde formulierdata daar bewust op regel 189 (`$_POST['form'] = $post;`) terug, zodat plugins die zelf `$_POST` uitlezen ook de verwerkte waarden zien, en leest die op regel 200 (`$post = $_POST['form'];`) ook weer terug. `detecteerEvalOpVerzoekinvoer()` (1.24) volgt de gegevensstroom nu wél per functie, maar behandelde `eval($form->ScriptProcess)` daardoor alsof het `eval($form)` was: de regex in stap 3 pakt bij het herkennen van de ge-evalde variabele alleen de kale naam `\$(\w+)` en negeert alles wat erna komt, dus `->ScriptProcess` viel gewoon weg.
+- Het verschil is essentieel: `$formId` bepaalt alleen **welk bestaand, door de sitebeheerder zelf geschreven PHP-script** (RSForm's ingebouwde "PHP Scripts"-functie, opgeslagen in de database) wordt uitgevoerd, niet de inhoud ervan. De request bepaalt de *keuze*, niet de *code*. Dat is precies wat `eval($form->AdminEmailScript)`/`eval($form->UserEmailScript)`/`eval($form->ScriptProcess)`/`eval($form->ScriptProcess2)` in RSForm doen - gedocumenteerd, bewust gedrag van de extensie.
+- Fix: stap 3 van `detecteerEvalOpVerzoekinvoer()` telt `eval($obj->property)` niet langer mee, ook niet als `$obj` besmet is (`(?!\s*->)` na de gevangen variabelenaam). `eval($var['sleutel'])` (array-toegang op een besmette variabele) blijft wél gewoon meetellen - alleen `->eigenschap`-toegang wordt uitgesloten. Dit is een bewuste, conservatieve keuze in dezelfde lijn als de rest van deze detectie: `eval($obj->property)` waarbij de property zelf rechtstreeks (zonder tussenvariabele) met `$obj->property = $_POST[...]` gevuld is, wordt met deze fix (net als voorheen - dat werd al niet gevolgd) niet gedetecteerd. Een echte aanvaller kan zo'n eigenschap sowieso niet vullen zonder al ergens anders op de site te kunnen schrijven.
+- Getest: de 8 gevallen uit 1.24 (allemaal nog steeds correct), plus 3 nieuwe - het echte `ajaxValidate()`-fragment uit RSForm!'s broncode (nu schoon), `eval($data['code'])` op een besmette array (blijft terecht gemeld) en de eerder genoemde bekende blinde vlek (rechtstreekse `$obj->property = $_POST[...]`, blijft gemist, zoals voorheen).
+
 ## 1.24 - 2026-09-21
 
 ### Bugfix: valse "ZEKER BACKDOOR"-melding op RSForm! (PATROON 26 keek over het hele bestand)

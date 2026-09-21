@@ -1795,8 +1795,16 @@ function detecteerEvalOpVerzoekinvoer(string $inhoud): ?string
             }
         }
 
-        // 3. Wordt zo'n variabele aan eval()/assert() gegeven?
-        if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)/i', $blok, $aanroepen)) {
+        // 3. Wordt zo'n variabele aan eval()/assert() gegeven? Let op: eval($obj->property) telt hier BEWUST
+        // niet mee, ook als $obj besmet is - (?!\s*->) na de variabelenaam. Anders wordt "de eigenschap van een
+        // object" verward met "de variabele zelf": bij RSForm! (com_rsform/controller.php, ajaxValidate())
+        // wordt $form (via $formId, via $post) uiteindelijk afgeleid van verzoekgegevens, maar wat er echt naar
+        // eval() gaat is $form->ScriptProcess - een database-veld (het door de sitebeheerder zelf ingevoerde
+        // PHP-validatiescript), geselecteerd via het formulier-ID, niet de request-tekst zelf. $formId bepaalt
+        // alleen WELK al bestaand, door de beheerder geschreven script wordt uitgevoerd, niet de inhoud ervan.
+        // eval($var['sleutel']) (array-toegang) blijft wel gewoon meetellen - alleen "->eigenschap" wordt
+        // uitgesloten.
+        if ($besmet && preg_match_all('/\b(?:eval|assert)\s*\(\s*@?\s*\$(\w+)(?!\s*->)/i', $blok, $aanroepen)) {
             foreach ($aanroepen[1] as $naam) {
                 if (isset($besmet[$naam])) {
                     return $melding;

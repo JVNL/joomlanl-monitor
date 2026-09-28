@@ -124,7 +124,7 @@ function parseVerdachtDetails(?string $details): array
         //    letterlijk bij ELKE scan, waardoor eenzelfde, ongewijzigde
         //    clustermelding na het klikken op "Vertrouwen" bij de
         //    eerstvolgende scan alsnog weer als nieuw verscheen - ontdekt
-        //    en gemeld door Wouter (augustus 2026, leestafel.info).
+        //    en gemeld in augustus 2026.
         // Bij een BESTAND blijft de wijzigingsdatum wel meetellen -
         // verandert de inhoud van een bestand dat je eerder vertrouwde, dan
         // is dat wél terecht een reden om opnieuw te waarschuwen.

@@ -439,7 +439,7 @@ function vindMassaleUpload($startMap, &$rootUnknown)
             // precies die teruggeparste 'naam' als doelwit mee, dus een
             // klik op "Verwijder" verwijderde daardoor de HELE map, inclusief
             // alle legitieme bestanden erin, in plaats van alleen de 18
-            // gemelde bestanden. Ontdekt en gemeld door Wouter (augustus 2026).
+            // gemelde bestanden. Ontdekt in augustus 2026.
             //
             // Twee onafhankelijke vangnetten tegelijk:
             //  1. 'type' => 'cluster' laat beveiliging.php de destructieve
@@ -1894,6 +1894,9 @@ function bepaalVerdachteRegels(string $inhoud): array
         ['/\bcreate_function\s*\(/i', 'letop', 'Maakt een functie van tekst (een oude manier om code uit tekst uit te voeren).'],
         ['/document\.write\s*\(\s*unescape/i', 'letop', 'Schrijft (verborgen) JavaScript naar de pagina. Bekend van spam-injecties, maar ook van e-mailverbergers.'],
         ['/googlebot|bingbot/i', 'letop', 'Kijkt of de bezoeker een zoekmachine is. Bekend van "cloaking": zoekmachines iets anders tonen dan mensen.'],
+        ['/\bgoto\s+[A-Za-z_]\w*\s*;/', 'letop', 'goto-sprong: wordt in achterdeuren gebruikt om code op te knippen en onleesbaar te maken.'],
+        ['/(?:compress\.zlib|compress\.bzip2|phar|zip):\/\//i', 'hoog', 'Laadt een (gecomprimeerd) bestand via een stream-wrapper: zo wordt verstopte code uit een "onschuldig" bestand uitgevoerd.'],
+        ['/new\s+class\s*\(\s*[\'"]/i', 'letop', 'Anonieme klasse met een tekst als argument: bekende vorm van een lader die een verstopt bestand includet.'],
     ];
     foreach (explode("\n", $code) as $i => $tekst) {
         if (trim($tekst) === '') {
@@ -2029,6 +2032,261 @@ function verwijderPhpCommentaar(string $inhoud): string
     }
 
     return $uit;
+}
+
+/**
+ * Decodeert letterlijke base64-reeksen (40+ tekens) die in de code staan, en geeft de leesbare uitkomst terug
+ * (alleen reeksen die na decodering vrijwel volledig uit tekst bestaan). Er wordt NIETS uitgevoerd.
+ *
+ * Aanleiding (september 2026, Vimexx-site): in libraries/loader.php stond één regel
+ *   eval('goto L_ctwotd; ... L_ctwotd: $xfaz = base64_decode(\'bmV3IGNsYXNzKCdjb21wcmVzcy56bGli...\'); ... eval($xfaz); ...');
+ * die pas na decodering zijn werk laat zien:
+ *   new class('compress.zlib://' . 'administrator/components/com_media/layouts/default-c8287be1.less') {
+ *       function __construct($x) { @InCLuDe_onCE($x); } };
+ * Alle bestaande patronen zoeken naar leesbare tekst (bv. include + compress.zlib:// dicht bij elkaar, PATROON 14),
+ * en zagen dus niets. Door de base64-reeksen hier zelf te decoderen kunnen dezelfde controles ook op de verborgen
+ * code worden losgelaten.
+ */
+function haalIngebedBase64Tekst(string $inhoud, int $maxReeksen = 40): string
+{
+    if (!preg_match_all('/[A-Za-z0-9+\/]{40,}={0,2}/', $inhoud, $treffers)) {
+        return '';
+    }
+
+    $uit = '';
+    $aantal = 0;
+    foreach (array_unique($treffers[0]) as $reeks) {
+        if (++$aantal > $maxReeksen) {
+            break;
+        }
+        if (strlen($reeks) > 400000) {
+            continue;
+        }
+        $gedecodeerd = base64_decode($reeks, true);
+        if ($gedecodeerd === false || $gedecodeerd === '') {
+            // Een reeks die midden in een langere string begint kan een ongeldige lengte hebben - één keer bijsnijden.
+            $gedecodeerd = base64_decode(substr($reeks, 0, strlen($reeks) - (strlen($reeks) % 4)), true);
+            if ($gedecodeerd === false || $gedecodeerd === '') {
+                continue;
+            }
+        }
+        $proef = substr($gedecodeerd, 0, 2000);
+        $leesbaar = preg_match_all('/[\x09\x0A\x0D\x20-\x7E]/', $proef);
+        // Niet-ASCII tekens (bv. de Chinese variabelenamen in de lader hierboven) tellen als UTF-8 ook mee.
+        $utf8Bytes = preg_match_all('/[\x80-\xFF]/', $proef);
+        if ($utf8Bytes > 0 && function_exists('mb_check_encoding') && !mb_check_encoding($proef, 'UTF-8')) {
+            $utf8Bytes = 0;
+        }
+        if (($leesbaar + $utf8Bytes) / max(1, strlen($proef)) < 0.9) {
+            continue; // binaire data (bv. een ingebedde afbeelding), geen verstopte code
+        }
+        $uit .= $gedecodeerd . "\n";
+    }
+
+    return $uit;
+}
+
+/**
+ * True als include/require(_once) ergens met "gemengde" hoofdletters is geschreven (bv. "InCLuDe_onCE",
+ * "iNCluDE_ONcE"). PHP-sleutelwoorden zijn hoofdletterongevoelig, dus dit werkt gewoon - maar geen enkele
+ * normale programmeur schrijft het zo: het is puur bedoeld om scanners te ontlopen die op "include" zoeken.
+ * "include", "INCLUDE" en "Include" tellen niet mee.
+ */
+function heeftVermomdeInclude(string $code): bool
+{
+    if (!preg_match_all('/\b(include|require)(_once)?\b/i', $code, $treffers)) {
+        return false;
+    }
+    foreach ($treffers[0] as $woord) {
+        if ($woord !== strtolower($woord) && $woord !== strtoupper($woord) && $woord !== ucfirst(strtolower($woord))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Herkent een "lader": een regel code die zelf weinig doet, maar een elders verstopt bestand (de payload) laadt en
+ * uitvoert. Kenmerken uit de praktijk (september 2026, tientallen laders op één site):
+ *  - eval('goto L_xxxxxx; ...') - de code is opgeknipt in stukjes met goto-sprongen ertussen, zodat de volgorde
+ *    onleesbaar wordt; normale code gebruikt nauwelijks goto, en nooit in combinatie met eval();
+ *  - een anonieme klasse (new class('compress.zlib://...')) of include/require met een stream-wrapper
+ *    (compress.zlib://, phar://, zip://) - vaak pas zichtbaar na het decoderen van een base64-reeks;
+ *  - include_once met vermomde hoofdletters (zie heeftVermomdeInclude()).
+ * De payload zelf is een gzip-bestand met een onschuldige extensie (.less, .js, .png, .webp, .htm ...) en wordt
+ * apart gevonden door controleerVermomdGecomprimeerdBestand().
+ *
+ * @return array{reden:string, payloads:string[]}|null
+ */
+function detecteerVerborgenLader(string $inhoud): ?array
+{
+    $heeftEval = (bool) preg_match('/\beval\s*\(/i', $inhoud);
+    $aantalGotos = preg_match_all('/\bgoto\s+[A-Za-z_]\w*\s*;/', $inhoud);
+    $gedecodeerd = (preg_match('/base64_decode|eval\s*\(/i', $inhoud)) ? haalIngebedBase64Tekst($inhoud) : '';
+    $alles = $inhoud . "\n" . $gedecodeerd;
+
+    $signalen = [];
+
+    if (preg_match('/\beval\s*\(\s*[\'"]\s*goto\s+[A-Za-z_]\w*\s*;/i', $inhoud)) {
+        $signalen[] = "eval('goto ...') - code opgeknipt met goto-sprongen en daarna uitgevoerd";
+    } elseif ($heeftEval && $aantalGotos >= 5) {
+        $signalen[] = "{$aantalGotos}x goto i.c.m. eval() - opgeknipte, onleesbaar gemaakte code";
+    }
+
+    $wrapper = '(?:compress\.zlib|compress\.bzip2|phar|zip|data)';
+    $heeftWrapperLader = preg_match('/new\s+class\s*\(\s*[\'"]' . $wrapper . ':\/\//i', $alles)
+        || preg_match('/\b(?:include|require)(?:_once)?\s*[\(\s]\s*[^;]{0,120}' . $wrapper . ':\/\//i', $alles)
+        || (preg_match('/[\'"]' . $wrapper . ':\/\/[\'"]/i', $alles) && preg_match('/\b(?:include|require)(?:_once)?\b/i', $alles));
+    if ($heeftWrapperLader) {
+        $signalen[] = 'laadt een bestand via een stream-wrapper (compress.zlib://, phar://, zip://)'
+            . ($gedecodeerd !== '' && !preg_match('/' . $wrapper . ':\/\//i', $inhoud) ? ', verstopt in een base64-reeks' : '');
+    }
+
+    if (heeftVermomdeInclude(verwijderPhpCommentaar($inhoud)) || heeftVermomdeInclude($gedecodeerd)) {
+        $signalen[] = 'include/require met vermomde hoofdletters (bv. "InCLuDe_onCE")';
+    }
+
+    // Eén los signaal is (behalve bij eval('goto')) te weinig; twee of meer is een lader.
+    $zeker = isset($signalen[0]) && strpos($signalen[0], "eval('goto") === 0;
+    if (!$zeker && count($signalen) < 2) {
+        return null;
+    }
+
+    // Het pad van de payload uit de (gedecodeerde) code halen, zodat die in de melding kan staan.
+    $payloads = [];
+    if (preg_match_all('/' . $wrapper . ':\/\/[\'"]?\s*(?:\.\s*)?[\'"]?([A-Za-z0-9_\-\/\.]{3,200})[\'"]/i', $alles, $p)) {
+        foreach ($p[1] as $pad) {
+            $pad = ltrim($pad, '/');
+            if ($pad !== '' && strpos($pad, '..') === false) {
+                $payloads[$pad] = true;
+            }
+        }
+    }
+
+    return [
+        'reden' => 'VERBORGEN LADER - ' . implode('; ', $signalen) . ', ZEKER BACKDOOR',
+        'payloads' => array_keys($payloads),
+    ];
+}
+
+/**
+ * Bekende, complete remote-beheerscripts ("file manager"-achterdeuren) herkennen aan vaste namen in de code.
+ * "aqua": Chinese remote file manager (september 2026 in .cagefs/tmp aangetroffen), met o.a. eval() van
+ * meegestuurde code (bundle_beima), zelfverspreiding (spread), code bovenin index.php zetten, defines.php schrijven
+ * en alle geschreven bestanden een willekeurige datum in 2020 geven om niet op te vallen.
+ */
+function detecteerBekendRemoteBeheerscript(string $inhoud): ?string
+{
+    $aquaKenmerken = ['HTTP_X_AQUA_TOKEN', 'HTTP_X_AQUA_ENC', 'aqua_json(', 'bundle_beima', 'aqua_touch_2020', 'bundle_harden_nonwp', 'aqua_force_write('];
+    $gevonden = 0;
+    foreach ($aquaKenmerken as $kenmerk) {
+        if (stripos($inhoud, $kenmerk) !== false) {
+            $gevonden++;
+        }
+    }
+    if ($gevonden >= 2) {
+        return '"aqua" remote file manager - voert meegestuurde PHP-code uit, kopieert zichzelf, injecteert code in index.php/defines.php '
+            . 'en geeft bestanden een nepdatum in 2020, ZEKER BACKDOOR';
+    }
+
+    return null;
+}
+
+/**
+ * Leest de eerste twee bytes van een bestand: gzip-bestanden beginnen altijd met 1F 8B.
+ */
+function isGzipBestand(string $pad): bool
+{
+    $fh = @fopen($pad, 'rb');
+    if ($fh === false) {
+        return false;
+    }
+    $kop = @fread($fh, 2);
+    @fclose($fh);
+
+    return $kop === "\x1f\x8b";
+}
+
+/**
+ * Een gzip-gecomprimeerd bestand met de extensie van een gewoon, statisch bestand (.less, .scss, .js, .css, .png,
+ * .jpg, .webp, .htm, .html, ...) is een verstopte payload: een webserver of browser doet daar niets mee, maar PHP kan
+ * het via include('compress.zlib://...') gewoon uitvoeren. Legitiem gecomprimeerde bestanden hebben altijd een
+ * eigen extensie (.gz, .tgz, .svgz) - Joomla levert bv. "*.min.js.gz" mee, die dus niet meetellen.
+ *
+ * Aanleiding (september 2026): elf van zulke payloads in administrator/components/com_media en com_mails, met namen
+ * die precies naast een echt bestand pasten (MediaActionPlugin-lib.htm naast MediaActionPlugin.php, core-edit.webp,
+ * vendor-Dispatcher.scss) en een nepdatum. Geen enkele bestaande controle keek naar zulke bestanden.
+ */
+function controleerVermomdGecomprimeerdBestand(string $pad, array &$backdoorVondsten, string $startMap): void
+{
+    $naam = basename($pad);
+    if (preg_match('/\.(gz|tgz|svgz|gzip|taz)$/i', $naam)) {
+        return;
+    }
+    $grootte = @filesize($pad);
+    if ($grootte === false || $grootte < 20 || $grootte > 5 * 1024 * 1024) {
+        return;
+    }
+    if (!isGzipBestand($pad)) {
+        return;
+    }
+
+    $ruw = @file_get_contents($pad);
+    $uitgepakt = ($ruw !== false && function_exists('gzdecode')) ? @gzdecode($ruw) : false;
+    $bevatPhp = is_string($uitgepakt) && preg_match('/<\?(php\b|=)/i', substr($uitgepakt, 0, 200000));
+    $extensie = strtolower(pathinfo($naam, PATHINFO_EXTENSION));
+    $extTekst = $extensie !== '' ? '.' . $extensie : 'zonder extensie';
+
+    if ($bevatPhp) {
+        $reden = 'VERSTOPTE PHP-PAYLOAD - gzip-gecomprimeerd PHP-bestand vermomd als "' . $extTekst . '"-bestand. Wordt door een lader elders '
+            . 'uitgevoerd via include(\'compress.zlib://...\'). Verwijderen, en zoek de lader die ernaar verwijst, ZEKER BACKDOOR';
+        $risico = 100;
+    } else {
+        $reden = 'Gzip-gecomprimeerd bestand met een misleidende extensie ("' . $extTekst . '") - echte gecomprimeerde bestanden eindigen op .gz. '
+            . 'Mogelijk een verstopte payload, VERDACHT';
+        $risico = 70;
+    }
+
+    $backdoorVondsten[] = [
+        'naam' => str_replace($startMap, '', $pad),
+        'reden' => $reden,
+        'risico' => $risico,
+        'bestandspad' => $pad,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+        'grootte' => (int) $grootte,
+    ];
+}
+
+/**
+ * Mapnamen die een aanvaller willekeurig genereert en in bestaande Joomla-mappen wegzet: een kort voorvoegsel plus
+ * 5-6 hexadecimale tekens (app59b4fb, ext492682, cache34f3bd, static34a766, sysc6f3f7, libe3663e), of alleen hex/
+ * cijfers (4ff9d, a0f02, 331736). Bij één opgeschoonde site (september 2026) stonden er ruim dertig, verspreid over
+ * administrator/, api/, components/, libraries/, media/, modules/, plugins/ en templates/.
+ * Er moet minstens één cijfer in het hex-deel zitten, zodat gewone woorden van alleen a-f (bv. "facade") niet
+ * meetellen.
+ */
+function isWillekeurigeAanvallersMapnaam(string $naam): bool
+{
+    return (bool) preg_match('/^(?:[a-z]{2,6})?(?=[0-9a-f]*[0-9])[0-9a-f]{5,6}$/', $naam);
+}
+
+/**
+ * True als de map direct (niet dieper) minstens één PHP-uitvoerbaar bestand bevat.
+ */
+function mapBevatPhpBestand(string $map): bool
+{
+    $items = @scandir($map);
+    if ($items === false) {
+        return false;
+    }
+    foreach ($items as $item) {
+        if ($item !== '.' && $item !== '..' && isPhpUitvoerbareExtensie($item) && is_file($map . '/' . $item)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $ignoreerBestanden = [])
@@ -2568,6 +2826,44 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         $verdacht = true;
     }
 
+    // PATROON 27: bekende, complete remote-beheerscripts (zie detecteerBekendRemoteBeheerscript()).
+    // Als herkend, gaat de naam van het script vóór een eventuele algemenere reden die al gevonden was.
+    $beheerscript = detecteerBekendRemoteBeheerscript($inhoud);
+    if ($beheerscript !== null) {
+        $reden = $verdacht ? $beheerscript . ' [+ ' . $reden . ']' : $beheerscript;
+        $verdacht = true;
+    }
+
+    // PATROON 28: verborgen lader (eval('goto ...'), stream-wrapper-include in een base64-reeks, vermomde include) -
+    // zie detecteerVerborgenLader(). Net als PATROON 26 ook toegevoegd als het bestand al om een andere reden is gemeld:
+    // het pad van de payload is dan precies de informatie die nodig is om op te ruimen.
+    $lader = detecteerVerborgenLader($inhoud);
+    if ($lader !== null) {
+        $laderReden = $lader['reden'];
+        if (!empty($lader['payloads'])) {
+            $siteRoot = $GLOBALS['startMap'] ?? dirname($bestandpad);
+            $delen = [];
+            foreach ($lader['payloads'] as $payloadPad) {
+                $bestaat = is_file(rtrim($siteRoot, '/') . '/' . $payloadPad);
+                $delen[] = $payloadPad . ($bestaat ? ' - STAAT ER NOG, ook verwijderen' : ' - al weg');
+            }
+            $laderReden .= '. Laadt payload: ' . implode('; ', $delen);
+        }
+        // Zit de lader als losse regel in een verder normaal bestand (een kernbestand, een templatebestand)? Dan is
+        // quarantaine of verwijderen de verkeerde actie: daarmee verdwijnt ook de echte code en valt de site uit.
+        // Bij de aanleiding stond hij in libraries/loader.php, dat bij elke paginaweergave wordt geladen.
+        if (strlen($inhoud) > 3000) {
+            $laderReden .= '. LET OP: dit lijkt een INJECTIE in een bestaand bestand - niet in quarantaine zetten of verwijderen (dan valt de site uit), '
+                . 'maar vervangen door een schoon exemplaar (kernbestand: officieel Joomla-pakket; template/extensie: opnieuw installeren)';
+        }
+        if ($verdacht) {
+            $reden .= ' [+ ' . $laderReden . ']';
+        } else {
+            $reden = $laderReden;
+            $verdacht = true;
+        }
+    }
+
     // PATROON 26: eval()/assert() op invoer uit het verzoek - ook via tussenvariabelen en een "versleutel"-stap.
     // Wordt óók uitgevoerd als het bestand al door een ander patroon (bv. de locatie) is gemeld: de inhoudelijke reden
     // hoort er dan bij, want dat is het bewijs dat het echt een achterdeur is en niet alleen een verdachte plek.
@@ -2800,12 +3096,19 @@ function scanNietPhpBestandOpVerstopteCode($bestandpad, &$backdoorVondsten, &$mo
     // een uploadmap vermomt.
     $overgeslagenExtensies = ['js', 'css', 'json', 'md', 'less', 'scss', 'map', 'sql', 'yml', 'yaml'];
     $extensie = strtolower(pathinfo($bestandpad, PATHINFO_EXTENSION));
+    // Een verborgen bestand als ".AOZ2rZ" heeft voor pathinfo() de "extensie" AOZ2rZ - in werkelijkheid heeft het er geen.
+    if (preg_match('/^\.[^.]+$/', basename($bestandpad))) {
+        $extensie = '';
+    }
     if ($extensie !== '' && in_array($extensie, $overgeslagenExtensies, true)) {
         return;
     }
 
+    // Bestanden zonder extensie mogen groter zijn: de "aqua"-achterdeur in .cagefs/tmp was 61.997 bytes en viel net
+    // buiten de oude grens van 60.000. Een foto heeft altijd een extensie, dus dit maakt de scan nauwelijks zwaarder.
+    $maxGrootte = $extensie === '' ? 1024 * 1024 : 60000;
     $grootte = @filesize($bestandpad);
-    if ($grootte === false || $grootte === 0 || $grootte > 60000) {
+    if ($grootte === false || $grootte === 0 || $grootte > $maxGrootte) {
         return;
     }
 
@@ -3179,6 +3482,22 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                 continue;
             }
 
+            // Willekeurig genoemde map (app59b4fb, cache34f3bd, 4ff9d, 331736 ...) met PHP erin, ergens binnen de
+            // site - zie isWillekeurigeAanvallersMapnaam(). Alleen dieper dan het topniveau: op het topniveau meldt
+            // checkRootLevel() onbekende mappen al.
+            if ($diepte > 0 && isWillekeurigeAanvallersMapnaam($item) && mapBevatPhpBestand($volledigPad)) {
+                $backdoorVondsten[] = [
+                    'naam' => str_replace($startMap, '', $volledigPad),
+                    'reden' => 'VERBORGEN MAP - willekeurig gegenereerde mapnaam "' . $item . '" (voorvoegsel + hex-code of alleen cijfers) met PHP erin, '
+                        . 'weggezet tussen gewone Joomla-mappen. Bestaat in Joomla en in normale extensies niet; kenmerkend voor een aanvaller die '
+                        . 'meerdere reserve-ingangen verspreidt. Controleer of de map bij een extensie hoort en verwijder hem anders in zijn geheel, VERDACHT',
+                    'risico' => 85,
+                    'bestandspad' => $volledigPad,
+                    'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
+                    'grootte' => 0,
+                ];
+            }
+
             // Speciale aandacht voor nummermappen
             if (preg_match('/^\d{4,}$/', $item)) {
                 // Scan alle PHP in nummergegeven map
@@ -3197,7 +3516,11 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                 // dat voor de hele submap eronder, ongeacht hoe diep - vandaar
                 // dat de vlag hier bepaald wordt en daarna gewoon meegegeven
                 // blijft worden aan diepere aanroepen.
-                $doorGevenGevoeligeUploadmap = $inGevoeligeUploadmap
+                // .cagefs/tmp (CloudLinux, buiten de website, via het extra scanpad) geldt ook als uploadmap: daar
+                // stonden in september 2026 zeven kopieën van een complete achterdeur als bestand ZONDER extensie
+                // (".AOZ2rZ", ".biqApW", ...), die de gewone scan (alleen .php-achtige extensies) oversloeg.
+                $isCageFsTmp = strtolower($item) === 'tmp' && basename($pad) === '.cagefs';
+                $doorGevenGevoeligeUploadmap = $inGevoeligeUploadmap || $isCageFsTmp
                     || ($diepte === 0 && in_array(strtolower($item), $gevoeligeUploadmapNamen, true));
 
                 scanRecursief($volledigPad, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, $diepte + 1, [], $rechtenAfwijkingen, $doorGevenGevoeligeUploadmap);
@@ -3231,6 +3554,28 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
             // dubbele scan/dubbele melding van hetzelfde bestand).
             if (!$heeftPhpUitvoerbareExtensie && $inGevoeligeUploadmap) {
                 scanNietPhpBestandOpVerstopteCode($volledigPad, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap);
+            }
+
+            // Gzip-payload met de extensie van een gewoon bestand (.less/.js/.png/.webp/.htm ...) - overal, niet alleen
+            // in uploadmappen: de aangetroffen payloads stonden juist diep in administrator/components/.
+            if (!$heeftPhpUitvoerbareExtensie) {
+                controleerVermomdGecomprimeerdBestand($volledigPad, $backdoorVondsten, $startMap);
+            }
+
+            // Los PHP-bestand in een map van media/ die alleen voor statische bestanden is (js/css/images/...).
+            // Joomla zelf zet daar nooit PHP neer; aangetroffen (september 2026): media/com_joomlaupdate/js/index.php,
+            // media/plg_system_jooa11y/js/index.php, media/com_contenthistory/js/index.php.
+            if ($heeftPhpUitvoerbareExtensie
+                && preg_match('#[/\\\\]media[/\\\\].+[/\\\\](js|css|scss|less|images|img|fonts|icons)[/\\\\][^/\\\\]+$#i', $volledigPad)) {
+                $backdoorVondsten[] = [
+                    'naam' => str_replace($startMap, '', $volledigPad),
+                    'reden' => 'PHP-bestand in een map voor statische bestanden (media/.../' . basename(dirname($volledigPad)) . '/) - Joomla en normale extensies '
+                        . 'zetten daar geen PHP neer, VERDACHT',
+                    'risico' => 70,
+                    'bestandspad' => $volledigPad,
+                    'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
+                    'grootte' => (int) @filesize($volledigPad),
+                ];
             }
 
             // .htaccess-bestanden: apart scannen op zelfbeschermings-/locatiepatronen
@@ -4157,8 +4502,20 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
         }
 
         // Losse rootbestanden - hashPhpBestandenInMap() werkt per map, dus
-        // deze twee apart afhandelen.
-        foreach (['index.php', 'administrator/index.php'] as $relBestand) {
+        // deze apart afhandelen. Ook de PHP-bestanden direct in libraries/
+        // (loader.php, bootstrap.php, cms.php, import.legacy.php ...): die
+        // vielen tot nu toe buiten de vergelijking, omdat alleen libraries/src
+        // werd gehasht (libraries/vendor in zijn geheel is te groot). Juist
+        // libraries/loader.php - bij elke paginaweergave geladen - bleek in
+        // september 2026 een geïnjecteerde lader te bevatten die daardoor
+        // niet als "afwijkend van het officiële pakket" werd gemeld.
+        $losseKernbestanden = ['index.php', 'administrator/index.php'];
+        foreach ((@scandir($startMap . '/libraries') ?: []) as $libItem) {
+            if (strtolower(substr($libItem, -4)) === '.php' && is_file($startMap . '/libraries/' . $libItem)) {
+                $losseKernbestanden[] = 'libraries/' . $libItem;
+            }
+        }
+        foreach ($losseKernbestanden as $relBestand) {
             if ($totaalGehashteBestanden >= $maxTotaalBestanden) {
                 break;
             }
@@ -4844,6 +5201,23 @@ foreach ($kernEntryPoints as $relEntry) {
             'grootte' => strlen($entryInhoud),
         ];
     }
+}
+
+// administrator/defines.php: Joomla laadt dit bestand (net als defines.php in de root) automatisch vóór al het
+// andere, als het bestaat. Het zit niet in het Joomla-pakket en wordt bijna nooit legitiem gebruikt; het is wel
+// precies wat de "aqua"-achterdeur neerzet (bundle_harden_nonwp). De root-variant meldt checkRootLevel() al als
+// onbekend PHP-bestand; deze variant zit een niveau dieper en viel daar dus buiten.
+$adminDefines = $startMap . '/administrator/defines.php';
+if (is_file($adminDefines)) {
+    $backdoorVondsten[] = [
+        'naam' => '/administrator/defines.php',
+        'reden' => 'administrator/defines.php aanwezig - wordt door Joomla automatisch geladen vóór al het andere, hoort niet bij het Joomla-pakket '
+            . 'en wordt zelden legitiem gebruikt. Bekijk de inhoud; niet zelf aangemaakt? Verwijderen, VERDACHT',
+        'risico' => 75,
+        'bestandspad' => $adminDefines,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($adminDefines) ?: time()),
+        'grootte' => (int) @filesize($adminDefines),
+    ];
 }
 
 // Meldingen over hetzelfde bestand (inhoudspatroon, cloaking, kernintegriteit) tot één vondst samenvoegen.

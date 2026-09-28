@@ -261,7 +261,7 @@ if ($siteResultaat['ok'] && $officieelResultaat['ok']) {
             <strong>🔴 Waarschuwing: dit bestand bevat een patroon dat vaak bij backdoors voorkomt.</strong><br>
             Reden: <?php echo htmlspecialchars($oordeel['reden']); ?>.<br><br>
             <strong>Wat te doen:</strong> onderneem GEEN actie op basis van dit oordeel alleen. Laat dit door een
-            ervaren ontwikkelaar bevestigen (of neem contact op met Wouter) voordat je iets verwijdert of aanpast -
+            ervaren ontwikkelaar bevestigen voordat je iets verwijdert of aanpast -
             dit kan ook een bewuste, legitieme aanpassing zijn, maar dat patroon rechtvaardigt altijd een tweede blik.
         </div>
         <?php else: ?>

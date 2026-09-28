@@ -1107,7 +1107,7 @@ foreach ($sites as $site) {
     // is), en pas daarna, BINNEN dezelfde hoofdversie, de vertrouwde
     // rood/onbekend/groen-status en het exacte versienummer. Zie de
     // vergelijkingsfunctie in Fase 2 hieronder voor hoe deze stap voor stap
-    // worden toegepast. Ontdekt/gevraagd door Wouter (augustus 2026): met
+    // worden toegepast. Ontdekt in augustus 2026: met
     // het oude, enkele ernstgetal kregen alle "actueel binnen eigen major"-
     // sites (6.1.3 zowel als een sterk verouderde 3.10.12) exact dezelfde
     // score, dus geen enkele zichtbare herschikking tussen hoofdversies.

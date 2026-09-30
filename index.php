@@ -246,6 +246,17 @@ td {
     font-weight: bold;
 }
 
+/* Knop(pen) helemaal rechts in de samenvattingsbalk - margin-left: auto
+   duwt dit blok naar de rechterrand, ook als de balk op een smal scherm
+   over meerdere regels verdeeld wordt (dan staat het rechts op de laatste
+   regel). */
+.overzicht-knoppen {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .acties {
     display: flex;
     gap: 10px;
@@ -947,6 +958,9 @@ foreach ($sites as $siteVoorTelling) {
     <div class="overzicht-item">
         <strong>Bestandsafwijkingen</strong>
         <span class="<?php echo $telBestandenAandacht > 0 ? 'oranje' : 'groen'; ?>"><?php echo $telBestandenAandacht > 0 ? '⚠️' : '🟢'; ?> <?php echo $telBestandenAandacht; ?></span>
+    </div>
+    <div class="overzicht-knoppen">
+        <a class="knop" href="hosting_overzicht.php?categorie=<?php echo urlencode($categorie); ?>" title="Per website: hostingpartij, server en IP-adres (live opgezocht)"><span class="icoon-glyph">🖥️</span> Hostingoverzicht</a>
     </div>
 </div>
 

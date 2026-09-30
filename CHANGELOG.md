@@ -1,5 +1,45 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.27 - 2026-09-29
+
+### Nieuw: hostingoverzicht (`hosting_overzicht.php`)
+Nieuwe knop **🖥️ Hostingoverzicht** helemaal rechts in de samenvattingsbalk op de monitorpagina (op de regel met "Totaal sites", "Schoon", enz.). Opent een los overzicht met per website de **hostingpartij**, de **server** en het **IP-adres**, in dezelfde opzet als de monitorpagina (alle sites onder elkaar, gegevens in kolommen, met de tabs Eigen websites / Websites van anderen).
+- **Alles live opgezocht, niets opgeslagen**: geen databasewijziging en niets nodig op de websites zelf. Het IP-adres komt uit de DNS van de domeinnaam (en van de FTP-server, als die is ingevuld), de servernaam uit de reverse DNS van dat IP-adres, en de netwerkeigenaar uit de openbare RIPE-gegevens (`stat.ripe.net`, gratis, zonder sleutel).
+- **Hostingpartij** wordt herkend aan een bekende naam in de servernaam (bijv. `web0171.zxcs.nl` = ZXCS, `w82.rzone.de` = Strato), dan in de FTP-server, dan aan de netwerkeigenaar; lukt dat niet, dan wordt de (opgeschoonde) naam van de netwerkeigenaar getoond. Bij de naam staat (als tooltip) waaraan die herkend is.
+- **Cloudflare en andere CDN's** (Cloudflare, Fastly, Akamai, Sucuri, Imperva) worden herkend aan hun netwerknummer: het IP-adres van de domeinnaam is dan niet de echte server, die wordt dan via de FTP-server bepaald. Zonder FTP-gegevens staat er eerlijk "Verborgen".
+- **Waarschuwing bij een afwijkende FTP-server**: wijst de FTP-server naar een ander IP-adres dan de website, dan wordt dat gemeld (mogelijk verhuisde site met verouderde FTP-gegevens). Zo'n afwijkende FTP-hostnaam telt dan ook niet mee voor het bepalen van de hostingpartij.
+- Per site een los verzoek (`hosting_info.php`, maximaal 4 tegelijk), zodat de pagina direct verschijnt en de rijen één voor één worden ingevuld zonder de PHP-tijdslimiet te raken. Het endpoint geeft de sessie direct vrij (`session_write_close()`), anders zouden de parallelle verzoeken toch op elkaar wachten.
+- Sorteren op elke kolom, per hostingpartij een telling boven de tabel (klikbaar als filter), en een knop **CSV downloaden** (puntkomma-gescheiden met BOM, opent direct goed in Excel).
+- **Filterpijltje ▾ bij de kolom Server**: uitklapmenu met alle servers (met aantal sites en een zoekveld), aan te vinken en toe te passen; het pijltje kleurt geel zolang het filter actief is. Werkt samen met het filter op hostingpartij.
+- Bij elke kolomkop een **?-icoontje** met een korte uitleg en een link naar de bijbehorende uitleg op de helppagina (net als op de monitorpagina). Een klik op het icoontje of het filterpijltje sorteert de kolom niet.
+- Datum én tijd van de laatste opzoeking ("Opgehaald op 29-09-2026 om 13:26").
+- Lettergrootte gelijk aan de monitorpagina (14px, via de uniforme lettergrootte in `responsive_stijlen.php`): bijkomende regels zijn niet meer kleiner en geen apart monospace-lettertype meer, maar vallen op door een gedempte kleur.
+- Nieuwe bestanden: `hosting_overzicht.php`, `hosting_info.php`, `hosting_functies.php`. Nieuw, beknopt hoofdstuk 13 op de helppagina met per kolom een eigen kopje (waar de ?-icoontjes naartoe linken); "Veelvoorkomende problemen" is nu hoofdstuk 14.
+
+### Bugfix hostingoverzicht: verkeerde servernaam voor sites op dezelfde server als de monitor (`hosting_functies.php`)
+Voor sites op dezelfde server als de monitor zelf toonde de kolom Server de naam uit de installatie-image van die server (bv. `clean-install.<leverancier>.net`) in plaats van de echte naam. Oorzaak: `gethostbyaddr()` kijkt eerst in `/etc/hosts` van de eigen server, en daar stond voor het eigen IP-adres nog die oude naam. De PTR-naam wordt nu rechtstreeks in de DNS opgevraagd (`dns_get_record()`, ook voor IPv6 en voor classless reverse-delegatie via een CNAME), met `gethostbyaddr()` alleen nog als terugval. Daarnaast wordt `witxl.nl` (de servernamen van Wned) nu als Wned herkend.
+
+### Bugfix: scan stopte bij een groot PHP-bestand ("Allowed memory size exhausted") (`scan_template.php`)
+Op een site met een groot PHP-bestand stopte het scanscript met een fatale geheugenfout. De monitor kreeg daardoor een HTTP 200 zonder herkenbaar scanresultaat en meldde "Onverwachte inhoud ontvangen". Oorzaak: `token_get_all()` (gebruikt om commentaar te negeren) kost 50 tot 100 keer de bestandsgrootte aan geheugen, en draaide via de lader-detectie op élk PHP-bestand.
+- **Tokenizer begrensd**: `verwijderPhpCommentaar()`, `maskeerPhpCommentaar()` en `splitsInFunctieBlokken()` slaan de tokenizer over bij bestanden boven 1 MB (zelfde gedrag als zonder tokenizer: hooguit een extra treffer in commentaar, nooit een gemiste echte treffer).
+- **Lader-detectie lichter**: de tokenizer draait alleen nog als de ruwe tekst een vermomde include bevat, in plaats van bij elk PHP-bestand. Dit maakt elke scan sneller en zuiniger.
+- **PHP-bestanden boven 4 MB** worden niet meer inhoudelijk gescand, maar wel gemeld als VERDACHT ("te groot om inhoudelijk te scannen"), zodat een opgevulde achterdeur geen blinde vlek wordt.
+- **Gzip-controle** pakt bestanden streamend uit en leest alleen de eerste 200 KB (voorheen werd het hele bestand in het geheugen uitgepakt).
+- **`.htaccess`-controle** leest maximaal 1 MB per bestand.
+- **Databestanden met een `die()`-kop worden overgeslagen** (`isNietUitvoerbaarPhpDatabestand()`). Het grote bestand bleek een Akeeba Backup-log (`*.log.php`); Akeeba (en Joomla zelf bij logs) geeft zulke bestanden een `.php`-extensie met `<?php die(); ?>` als eerste regel, zodat ze via de browser niets prijsgeven. Zo'n bestand kan nooit code uitvoeren, ook niet via include(), en is dus nooit een achterdeur. Herkenning op de eerste bytes van de inhoud, niet op pad of naam; een voorwaardelijke kop als `defined('_JEXEC') or die` telt bewust niet mee.
+
+### Bugfix: rechtenafwijking leek een dubbele vermelding in de scanuitvoer (`scan_template.php`)
+Bij de root-level items werd de reden niet getoond, waardoor een rechtenafwijking op een bestand dat ook als onbekend item in de lijst stond eruitzag als twee keer hetzelfde bestand (één keer met grootte "onbekend"). De reden staat er nu onder. Ook de telling "afwijkende rechten gesignaleerd" bij het extra scanpad telt de afwijkingen op het topniveau nu mee (gaf "0" terwijl er wel een in de lijst stond).
+
+### Bugfix: een crash van het scanscript werd gemeld als ".htaccess-probleem" (`start_scan.php`)
+Crashte het scanscript op de site (bv. geheugen- of tijdslimiet), dan gaf PHP de foutmelding terug als gewone pagina met HTTP 200, en meldde de monitor "Onverwachte inhoud ontvangen - mogelijk stuurt een .htaccess-bestand dit verzoek door". Nu herkent de monitor een PHP-fout ("Fatal error: ... on line N") in het antwoord en toont die letterlijk, met een korte uitleg bij een geheugen- of tijdslimiet. Dit werkt ook als de crash pas ná de kopregel van de scan gebeurt (die werd voorheen als "gestart" gemeld). Een antwoord dat het laatste blok van de scan bevat, telt nooit als crash, zodat een foutmelding in bv. een opgehaalde update-feed geen valse melding geeft. Een HTTP 500 (crash zonder zichtbare melding) wordt nu ook als waarschuwing gemeld in plaats van als "gestart".
+
+### Getest
+- Herkenning en opschoning van netwerkeigenaren (o.a. `CLDIN-NL Your Hosting B.V.`, `CLOUDFLARENET - Cloudflare, Inc., US`, `HETZNER-AS Hetzner Online GmbH, DE`) en servernamen, inclusief klantdomeinen die niet ten onrechte als hostingpartij mogen tellen (bijv. een eigen domeinnaam of `ftp.<klantdomein>`).
+- Nagebootste scenario's: gewone site, site achter Cloudflare mét en zonder FTP-gegevens, verhuisde site met oude FTP-gegevens, domein dat alleen met www bestaat.
+- Echte DNS-opzoekingen voor vier live sites, en de pagina in licht en donker thema.
+- In de browser: serverfilter (Niets → twee servers aanvinken → Toepassen), gecombineerd met het hostingpartij-filter, en Filter wissen; ?-icoontjes openen de pop-up zonder te sorteren; berekende lettergrootte 14px in alle cellen.
+
 ## 1.26 - 2026-09-28
 
 ### Nieuwe detecties: verborgen laders, gzip-payloads en verstopte mappen (`scan_template.php`)

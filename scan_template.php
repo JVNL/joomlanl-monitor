@@ -1649,7 +1649,8 @@ function voegDubbeleVondstenSamen(array &$backdoorVondsten, array &$rootLevelUnk
  */
 function splitsInFunctieBlokken(string $inhoud): array
 {
-    if (!function_exists('token_get_all')) {
+    // Zie verwijderPhpCommentaar(): boven 1 MB geen tokenizer (geheugen).
+    if (!function_exists('token_get_all') || strlen($inhoud) > 1024 * 1024) {
         return [$inhoud];
     }
 
@@ -1822,7 +1823,8 @@ function detecteerEvalOpVerzoekinvoer(string $inhoud): ?string
  */
 function maskeerPhpCommentaar(string $inhoud): string
 {
-    if (!function_exists('token_get_all')) {
+    // Zie verwijderPhpCommentaar(): boven 1 MB geen tokenizer (geheugen).
+    if (!function_exists('token_get_all') || strlen($inhoud) > 1024 * 1024) {
         return $inhoud;
     }
 
@@ -2014,7 +2016,11 @@ function isLosPhpBestandInMap(string $map, string $bestandpad): bool
 
 function verwijderPhpCommentaar(string $inhoud): string
 {
-    if (!function_exists('token_get_all')) {
+    // token_get_all() kost een veelvoud (50-100x) van de bestandsgrootte aan geheugen - bij een groot PHP-bestand
+    // liep de scan daardoor vast op de geheugenlimiet ("Allowed memory size exhausted"). Boven 1 MB de tekst
+    // ongewijzigd teruggeven (hetzelfde gedrag als zonder tokenizer): hooguit een extra treffer in commentaar,
+    // nooit een gemiste echte treffer.
+    if (!function_exists('token_get_all') || strlen($inhoud) > 1024 * 1024) {
         return $inhoud;
     }
 
@@ -2143,7 +2149,10 @@ function detecteerVerborgenLader(string $inhoud): ?array
             . ($gedecodeerd !== '' && !preg_match('/' . $wrapper . ':\/\//i', $inhoud) ? ', verstopt in een base64-reeks' : '');
     }
 
-    if (heeftVermomdeInclude(verwijderPhpCommentaar($inhoud)) || heeftVermomdeInclude($gedecodeerd)) {
+    // Eerst goedkoop op de ruwe tekst; alleen bij een treffer de (geheugenintensieve) tokenizer erop, om een
+    // treffer die alleen in commentaar staat alsnog weg te filteren. Voorheen draaide de tokenizer hier op ELK
+    // PHP-bestand.
+    if ((heeftVermomdeInclude($inhoud) && heeftVermomdeInclude(verwijderPhpCommentaar($inhoud))) || heeftVermomdeInclude($gedecodeerd)) {
         $signalen[] = 'include/require met vermomde hoofdletters (bv. "InCLuDe_onCE")';
     }
 
@@ -2232,9 +2241,17 @@ function controleerVermomdGecomprimeerdBestand(string $pad, array &$backdoorVond
         return;
     }
 
-    $ruw = @file_get_contents($pad);
-    $uitgepakt = ($ruw !== false && function_exists('gzdecode')) ? @gzdecode($ruw) : false;
-    $bevatPhp = is_string($uitgepakt) && preg_match('/<\?(php\b|=)/i', substr($uitgepakt, 0, 200000));
+    // Streamend uitpakken en alleen het begin lezen: gzdecode() pakte het HELE bestand uit in het geheugen, en een
+    // gzip van een paar MB (bv. een database-dump met een misleidende extensie) wordt uitgepakt al gauw tientallen MB.
+    $uitgepakt = false;
+    if (function_exists('gzopen')) {
+        $gz = @gzopen($pad, 'rb');
+        if ($gz !== false) {
+            $uitgepakt = @gzread($gz, 200000);
+            @gzclose($gz);
+        }
+    }
+    $bevatPhp = is_string($uitgepakt) && preg_match('/<\?(php\b|=)/i', $uitgepakt);
     $extensie = strtolower(pathinfo($naam, PATHINFO_EXTENSION));
     $extTekst = $extensie !== '' ? '.' . $extensie : 'zonder extensie';
 
@@ -2289,6 +2306,34 @@ function mapBevatPhpBestand(string $map): bool
     return false;
 }
 
+/**
+ * True als het bestand begint met een onvoorwaardelijke die()/exit() - bv. "<?php die(); ?>" (Akeeba Backup-logs,
+ * akstorage-bestanden) of "#<?php die('Forbidden.'); ?>" (Joomla-logs). Zo'n bestand is een databestand met een
+ * .php-extensie, bewust zo gemaakt dat het via de browser niets prijsgeeft: PHP stopt bij de eerste opdracht, dus
+ * alles daarna wordt nooit uitgevoerd - ook niet via include(). Het kan per definitie geen achterdeur zijn, hoe groot
+ * het ook is en wat er ook in staat. Herkenning op INHOUD (alleen de eerste bytes), niet op pad of naam, dus geen
+ * blinde vlek: een aanvaller die zo'n kop gebruikt, maakt zijn eigen bestand daarmee zelf onbruikbaar.
+ *
+ * Bewust NIET herkend: "defined('_JEXEC') or die" e.d. - dat is voorwaardelijk en draait binnen Joomla gewoon door.
+ *
+ * Aanleiding (september 2026): een Akeeba-backuplog van 55,6 MB liet de scan vastlopen op de geheugenlimiet, en werd
+ * daarna (met de groottegrens) als "VERDACHT / VERWIJDEREN!" gemeld.
+ */
+function isNietUitvoerbaarPhpDatabestand(string $pad): bool
+{
+    $fh = @fopen($pad, 'rb');
+    if ($fh === false) {
+        return false;
+    }
+    $kop = (string) @fread($fh, 256);
+    @fclose($fh);
+
+    return (bool) preg_match(
+        '/^(?:\xEF\xBB\xBF)?#?<\?php\s+(?:die|exit)\s*(?:\(\s*(?:\'[^\']*\'|"[^"]*"|\d+)?\s*\))?\s*(?:;|\?>)/i',
+        $kop
+    );
+}
+
 function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $ignoreerBestanden = [])
 {
     $bestandsnaam = basename($bestandpad);
@@ -2297,6 +2342,31 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
     }
 
     if (!is_readable($bestandpad)) {
+        return;
+    }
+
+    // Databestand met een die()-kop (Akeeba-logs e.d.): kan nooit code uitvoeren, dus niets te scannen - zie
+    // isNietUitvoerbaarPhpDatabestand(). Bewust vóór de groottegrens hieronder, want juist deze bestanden zijn vaak groot.
+    if (isNietUitvoerbaarPhpDatabestand($bestandpad)) {
+        return;
+    }
+
+    // Geheugenklep: de inhoud wordt hieronder meerdere keren bewerkt (regexen, tokenizer), wat een veelvoud van de
+    // bestandsgrootte aan geheugen kost. Een normaal PHP-bestand is zelden groter dan enkele honderden KB; boven
+    // deze grens wordt het bestand niet inhoudelijk gescand maar WEL gemeld, zodat opvullen geen blinde vlek geeft.
+    $maxInhoudGrootte = 4 * 1024 * 1024;
+    $grootte = @filesize($bestandpad);
+    if ($grootte !== false && $grootte > $maxInhoudGrootte) {
+        $vondsten[] = [
+            'naam' => str_replace(__DIR__, '', $bestandpad),
+            'reden' => 'TE GROOT OM INHOUDELIJK TE SCANNEN - PHP-uitvoerbaar bestand van ' . round($grootte / 1048576, 1) . ' MB. '
+                . 'Normale PHP-bestanden zijn vrijwel nooit zo groot; controleer handmatig wat dit is (logbestand, database-dump, '
+                . 'of een opgevulde achterdeur), VERDACHT',
+            'risico' => 55,
+            'bestandspad' => $bestandpad,
+            'gewijzigd' => date('Y-m-d H:i', @filemtime($bestandpad) ?: time()),
+            'grootte' => (int) $grootte,
+        ];
         return;
     }
 
@@ -2932,7 +3002,7 @@ function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap)
         return;
     }
 
-    $inhoud = file_get_contents($bestandpad);
+    $inhoud = @file_get_contents($bestandpad, false, null, 0, 1024 * 1024);
     if ($inhoud === false) {
         return;
     }
@@ -5162,7 +5232,17 @@ if (!$extraScanIngeschakeld) {
 
     $aantalVoorExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
 
+    // Rechtenafwijkingen op het topniveau zelf (checkExtraScanpadTopNiveau()) meetellen in de melding hieronder -
+    // die telde voorheen alleen de afwijkingen diéper in het extra scanpad, en gaf daardoor "0 afwijkende rechten"
+    // terwijl er in de lijst wel een stond.
+    $telRechtenAfwijkingen = function (array $items): int {
+        return count(array_filter($items, function ($item) {
+            return strpos((string) ($item['reden_override'] ?? ''), 'Afwijkende rechten') === 0;
+        }));
+    };
+    $rechtenTopNiveauVoor = $telRechtenAfwijkingen($rootLevelUnknown);
     checkExtraScanpadTopNiveau($extraScanRootAbsoluut, $rootLevelUnknown, $extraScanPadNegeren, $startMap);
+    $rechtenTopNiveau = $telRechtenAfwijkingen($rootLevelUnknown) - $rechtenTopNiveauVoor;
 
     $rechtenAfwijkingenExtra = [];
     scanRecursief($extraScanRootAbsoluut, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0, $extraScanPadNegeren, $rechtenAfwijkingenExtra);
@@ -5173,7 +5253,7 @@ if (!$extraScanIngeschakeld) {
     $aantalNaExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
     $extraScanMelding = "Extra map \"$extraScanRootAbsoluut\" meegescand ($extraScanNiveauGebruikt niveau(s) boven de website-root, automatisch bepaald: "
         . ($aantalNaExtraScan - $aantalVoorExtraScan) . " extra vondst(en) daar gevonden, "
-        . count($rechtenAfwijkingenExtra) . " afwijkende rechten gesignaleerd)."
+        . (count($rechtenAfwijkingenExtra) + $rechtenTopNiveau) . " afwijkende rechten gesignaleerd)."
         . ' Standaard overgeslagen: ' . implode(', ', $standaardExtraScanpadNegeren) . '.'
         . (!empty($extraScanPadNegerenEigen) ? ' Zelf ook overgeslagen: ' . implode(', ', $extraScanPadNegerenEigen) . '.' : '');
 }
@@ -5300,9 +5380,14 @@ if (!empty($rootLevelUnknown)) {
             echo "  ⚠️  [map] " . $naamMetSlash . "\n";
             echo "       Gewijzigd: {$item['gewijzigd']}\n";
         } else {
-            $grootte = isset($item['grootte']) ? number_format($item['grootte']) . ' bytes' : 'onbekend';
-            echo "  ⚠️  [file] " . $item['naam'] . " ({$grootte})\n";
+            $grootte = isset($item['grootte']) ? ' (' . number_format($item['grootte']) . ' bytes)' : '';
+            echo "  ⚠️  [file] " . $item['naam'] . "{$grootte}\n";
             echo "       Gewijzigd: {$item['gewijzigd']}\n";
+        }
+        // De reden meeprinten: zonder dit leek bv. een rechtenafwijking op een bestand dat al als "onbekend item"
+        // in de lijst stond op een dubbele vermelding van hetzelfde bestand.
+        if (!empty($item['reden_override'])) {
+            echo "       Reden: {$item['reden_override']}\n";
         }
     }
     echo "\n";

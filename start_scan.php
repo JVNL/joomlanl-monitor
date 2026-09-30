@@ -126,6 +126,31 @@ function bepaalVerouderdAntwoord(string $inhoud, string $verversCode, array $kop
  *   probleem.
  * @return string[] statusregels, in dezelfde volgorde als $sites
  */
+/**
+ * Haalt een PHP-foutmelding (Fatal error, Parse error, geheugen- of tijdslimiet) uit het antwoord van het
+ * scanscript, als leesbare tekst van één regel. null als er geen PHP-fout in staat.
+ *
+ * Aanleiding (september 2026): het scanscript liep op een site vast op de geheugenlimiet. PHP geeft zo'n fout
+ * met display_errors aan als gewone HTML met HTTP 200 - de monitor meldde dan "Onverwachte inhoud ... mogelijk
+ * stuurt een .htaccess-bestand dit verzoek door", terwijl de echte oorzaak letterlijk in het antwoord stond.
+ */
+function haalPhpFoutUitAntwoord(string $inhoud): ?string
+{
+    // Heeft het scanscript zijn laatste blok ("=== MONITOR ===") bereikt, dan is het niet gecrasht - ook als er
+    // ergens in de uitvoer een foutmelding staat (bv. het fragment van een kapotte update-feed van een ander).
+    if (strpos($inhoud, '=== MONITOR ===') !== false) {
+        return null;
+    }
+
+    $tekst = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($inhoud), ENT_QUOTES, 'UTF-8')));
+    // Strikt het PHP-formaat: "Fatal error: ... in <pad> on line N" (hoofdlettergevoelig, zoals PHP het schrijft).
+    if (!preg_match('/(?:PHP )?(?:Fatal error|Parse error): .{1,600}? on line \d+/', $tekst, $m)) {
+        return null;
+    }
+
+    return $m[0];
+}
+
 function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden = 30): array
 {
     $multiHandle = curl_multi_init();
@@ -192,6 +217,21 @@ function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden 
             $resultaten[$index] = "$domein: ⚠️ Toegang geweigerd (HTTP $httpCode) - dit wijst vaak op een .htaccess-bestand "
                 . "in de hoofdmap van de site (of een daarboven liggende map) dat het verzoek blokkeert, bijvoorbeeld "
                 . "door een kwaadwillende \"deny from all\"-regel. Controleer de .htaccess-bestanden handmatig via FTP.";
+        } elseif ($httpCode >= 200 && ($phpFout = haalPhpFoutUitAntwoord((string) $inhoud)) !== null) {
+            // Het scanscript draaide wél, maar crashte (bv. geheugen- of tijdslimiet). Bewust vóór de controle op
+            // "JOOMLA BACKDOOR-SCAN" hieronder: de crash kan ook ná die kopregel gebeuren, en dan werd dit ten
+            // onrechte als "gestart" gemeld. Geldt ook voor HTTP 500, dat PHP bij een fatale fout soms teruggeeft.
+            $hint = '';
+            if (stripos($phpFout, 'Allowed memory size') !== false) {
+                $hint = ' Het scanscript liep tegen de geheugenlimiet van de site aan - meestal door één zeer groot bestand '
+                    . '(het genoemde regelnummer wijst de plek in het scanscript aan, niet het bestand zelf).';
+            } elseif (stripos($phpFout, 'Maximum execution time') !== false) {
+                $hint = ' Het scanscript liep tegen de tijdslimiet van de site aan.';
+            }
+            $resultaten[$index] = "$domein: ⚠️ Het scanscript crashte op de site (HTTP $httpCode): $phpFout.$hint";
+        } elseif ($httpCode >= 500) {
+            $resultaten[$index] = "$domein: ⚠️ Serverfout (HTTP $httpCode) bij het aanroepen van het scanscript - vermoedelijk crasht het "
+                . 'scanscript op de site zonder zichtbare foutmelding. Open het scanscript handmatig in de browser of bekijk de PHP-foutlog van de site.';
         } elseif ($httpCode >= 200 && $httpCode < 300 && stripos((string) $inhoud, 'JOOMLA BACKDOOR-SCAN') === false) {
             // Verzoek kwam "ergens" aan (HTTP 200), maar de inhoud is niet
             // ons eigen scanscript - bijv. omdat een .htaccess het verzoek

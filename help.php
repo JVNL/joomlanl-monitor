@@ -226,6 +226,7 @@ th {
         <li><a href="#extensies">Het extensieoverzicht en de extensietabel gebruiken</a></li>
         <li><a href="#statussen">Wat betekenen de kleuren/statussen?</a></li>
         <li><a href="#backups-installatie">Back-ups, installatie- en updatepakketten</a></li>
+        <li><a href="#hostingoverzicht">Het hostingoverzicht: hostingpartij, server en IP-adres</a></li>
         <li><a href="#problemen">Veelvoorkomende problemen</a></li>
     </ol>
 </div>
@@ -984,8 +985,50 @@ th {
     </div>
 </section>
 
+<section id="hostingoverzicht">
+    <h2>13. Het hostingoverzicht: hostingpartij, server en IP-adres</h2>
+    <p>Via de knop <strong>🖥️ Hostingoverzicht</strong> (rechts in de samenvattingsbalk op de monitorpagina) zie je per website
+    <strong>waar</strong> die draait: bij welke hostingpartij, op welke server en op welk IP-adres. Handig om te zien welke sites
+    samen op één server staan, of om te merken dat een site verhuisd is.</p>
+    <p>Alles wordt bij het openen van de pagina <strong>live opgezocht</strong> in openbare gegevens (DNS en RIPE) en nergens
+    bewaard. Er hoeft niets op de websites zelf te staan. Bovenaan staat de datum en tijd van de laatste opzoeking; met
+    <strong>Opnieuw ophalen</strong> haal je alles opnieuw op.</p>
+
+    <h3 id="hosting-domein">Domein</h3>
+    <p>De website zoals die in de monitor is ingesteld. Het icoontje opent de website; de naam opent de site-instellingen, waar je
+    onder andere de FTP-gegevens invult.</p>
+
+    <h3 id="hosting-hostingpartij">Hostingpartij</h3>
+    <p>Het bedrijf waar de website draait. Herkend aan (in deze volgorde) een bekende naam in de servernaam, in de FTP-server, of aan
+    de eigenaar van het netwerk volgens RIPE. Beweeg met de muis over de naam om te zien waaraan die herkend is.
+    <em>Onbekend</em> betekent dat er niets herkend kon worden; <em>Verborgen</em> dat de site achter Cloudflare (of iets
+    vergelijkbaars) staat en er geen FTP-gegevens zijn om de echte server te vinden.</p>
+    <p>Boven de tabel staat per hostingpartij het aantal sites. Klik op een naam om alleen die sites te tonen.</p>
+
+    <h3 id="hosting-server">Server</h3>
+    <p>De naam van de computer waarop de website draait, bijvoorbeeld <code>web0171.zxcs.nl</code>. Sites met dezelfde servernaam
+    delen dus één server. Daaronder staat het netwerk (AS-nummer) van de hostingpartij.</p>
+    <p>Met het <strong>pijltje ▾</strong> in de kolomkop filter je op één of meer servers: vink aan welke je wilt zien en klik op
+    <strong>Toepassen</strong>. Het pijltje wordt geel zolang het filter actief is; <strong>Filter wissen</strong> toont weer alles.
+    Het filter werkt samen met het filter op hostingpartij.</p>
+
+    <h3 id="hosting-ip">IP-adres</h3>
+    <p>Het adres van de server op internet. Staat een site achter Cloudflare, dan is het adres van de domeinnaam dat van Cloudflare;
+    het echte adres wordt dan via de FTP-server bepaald en het Cloudflare-adres staat er ter info onder.</p>
+
+    <h3 id="hosting-toelichting">Toelichting</h3>
+    <p>Bijzonderheden per site, plus de ingestelde FTP-server en de nameservers. Let vooral op
+    <em>"De FTP-server is een ander IP-adres dan de website"</em>: dat kan kloppen, maar betekent vaak dat de site verhuisd is
+    en de FTP-gegevens in de monitor nog naar de oude hostingpartij wijzen.</p>
+
+    <div class="tip">
+        💡 Klik op een kolomkop om te sorteren (bijv. op IP-adres, dan staan sites op dezelfde server onder elkaar).
+        Met <strong>CSV downloaden</strong> krijg je alles als bestand dat direct in Excel opent.
+    </div>
+</section>
+
 <section id="problemen">
-    <h2>13. Veelvoorkomende problemen</h2>
+    <h2>14. Veelvoorkomende problemen</h2>
 
     <h3>Een site geeft plotseling 403 (offline) op alles</h3>
     <p>Vaak een beveiligingsplugin (bijv. Akeeba Admin Tools) die het IP-adres van de monitor tijdelijk blokkeert, omdat de scans er als verdacht verkeer uitzien. Zet het IP-adres van de monitor in de "Exceptions" van die plugin (zie het stappenplan bij "Site toevoegen").</p>
@@ -996,6 +1039,9 @@ th {
 
     <h3>Een scan starten of een beheeractie geeft "Onverwacht antwoord (HTTP 301)"</h3>
     <p>Dit wijst op een omleiding op de site zelf (bijv. http naar https, of www naar non-www) - de monitor volgt zo'n omleiding automatisch, maar krijgt in dit geval alsnog de omleidingspagina zelf terug in plaats van het scanscript. Controleer of er een <code>.htaccess</code>-bestand in de hoofdmap van de site (of een daarboven liggende map) staat dat het verzoek ergens anders naartoe stuurt, en of dat de bedoeling is.</p>
+
+    <h3>"Bekijk" (of een andere actie) geeft "HTTP 406 Not Acceptable"</h3>
+    <p>Dat is bijna altijd een webapplicatie-firewall (mod_security) van de hostingpartij, die het verzoek of het antwoord blokkeert - los van de monitor en van Joomla. Bij "Bekijk" gebeurt dat soms om de <strong>inhoud</strong> van het bestand zelf, bijvoorbeeld bij verdachte JavaScript of PHP-code in het antwoord. Het scanscript op de site is dan dus niet weg en ook niet verouderd. Bekijk het bestand via FTP, of vraag de hostingpartij om een uitzondering voor POST-verzoeken naar het scanscript. Gebeurt het bij elk bestand, ook bij bestanden zonder verdachte inhoud, laat het dan weten.</p>
 
     <h3>Het 📋-scanrapport toont steeds dezelfde (oude) tijd, of een herscan meldt "verouderd antwoord"</h3>
     <p>Een scanscript dat echt draait toont bij <strong>"Start:"</strong> altijd de actuele tijd. Zie je na meerdere scans steeds dezelfde tijd, dan komt het antwoord uit een <strong>cache</strong> (de browser, Cloudflare of de paginacache van de hostingpartij, bijv. LiteSpeed of Varnish) en draait het scanscript helemaal niet - dus er komt ook geen nieuw resultaat aan. Sinds versie 1.23 stuurt het scanscript headers mee die caching verbieden, vraagt de monitor elke keer een unieke URL op (<code>?nc=...</code>) en waarschuwt een herscan met "verouderd antwoord" als er toch een oud antwoord terugkomt. Blijft het gebeuren, dan houdt de cache zich niet aan die headers. Dan kun je:</p>

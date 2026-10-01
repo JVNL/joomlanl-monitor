@@ -999,14 +999,21 @@ th {
     onder andere de FTP-gegevens invult.</p>
 
     <h3 id="hosting-hostingpartij">Hostingpartij</h3>
-    <p>Het bedrijf waar de website draait. Herkend aan (in deze volgorde) een bekende naam in de servernaam, in de FTP-server, of aan
-    de eigenaar van het netwerk volgens RIPE. Beweeg met de muis over de naam om te zien waaraan die herkend is.
+    <p>Het bedrijf waar de website draait. Herkend aan (in deze volgorde) een bekende naam in de servernaam, in de
+    <strong>IP-toewijzing</strong> (aan wie het blok IP-adressen van de server is toegewezen), in de FTP-server, of aan de
+    eigenaar van het netwerk volgens RIPE. Beweeg met de muis over de naam om te zien waaraan die herkend is.</p>
+    <p>Getoond wordt de partij waar je het hostingpakket afneemt, niet de technische naam erachter. Sommige hostingpartijen
+    gebruiken voor hun servers of netwerk een andere naam dan hun merknaam; waar dat bekend is, staat gewoon de merknaam.
+    Huurt een hostingpartij ruimte bij een datacenter, dan is het datacenter de netwerkeigenaar, maar staat het IP-blok
+    meestal op naam van de hostingpartij zelf - en die wordt dan getoond. Het datacenter verschijnt alleen als er geen
+    specifiekere naam te vinden is. Wordt geen bekende
+    partij herkend, dan staat er de naam uit de IP-toewijzing of anders die van de netwerkeigenaar, zoals RIPE die kent.
     <em>Onbekend</em> betekent dat er niets herkend kon worden; <em>Verborgen</em> dat de site achter Cloudflare (of iets
     vergelijkbaars) staat en er geen FTP-gegevens zijn om de echte server te vinden.</p>
     <p>Boven de tabel staat per hostingpartij het aantal sites. Klik op een naam om alleen die sites te tonen.</p>
 
     <h3 id="hosting-server">Server</h3>
-    <p>De naam van de computer waarop de website draait, bijvoorbeeld <code>web0171.zxcs.nl</code>. Sites met dezelfde servernaam
+    <p>De naam van de computer waarop de website draait, bijvoorbeeld <code>server123.hostingpartij.nl</code>. Sites met dezelfde servernaam
     delen dus één server. Daaronder staat het netwerk (AS-nummer) van de hostingpartij.</p>
     <p>Met het <strong>pijltje ▾</strong> in de kolomkop filter je op één of meer servers: vink aan welke je wilt zien en klik op
     <strong>Toepassen</strong>. Het pijltje wordt geel zolang het filter actief is; <strong>Filter wissen</strong> toont weer alles.

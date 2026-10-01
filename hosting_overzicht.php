@@ -351,9 +351,9 @@ td {
 <div class="uitleg">
     De gegevens worden bij het openen van deze pagina <strong>live opgezocht</strong> en niet bewaard: het IP-adres via de
     DNS van de domeinnaam (en van de FTP-server, als die is ingevuld), de servernaam via de <em>reverse DNS</em> van dat
-    IP-adres, en de hostingpartij via die servernaam, de FTP-server of de eigenaar van het netwerk (openbare gegevens van
-    RIPE). Draait een website achter Cloudflare of een vergelijkbare dienst, dan is het IP-adres van de domeinnaam niet
-    dat van de echte server - die wordt dan via de FTP-server bepaald.
+    IP-adres, en de hostingpartij via die servernaam, de partij aan wie het IP-blok is toegewezen, de FTP-server of de
+    eigenaar van het netwerk (openbare gegevens van RIPE). Draait een website achter Cloudflare of een vergelijkbare
+    dienst, dan is het IP-adres van de domeinnaam niet dat van de echte server - die wordt dan via de FTP-server bepaald.
     <?php echo hulpIcoon('hostingoverzicht', 'Hoe de hostingpartij, server en het IP-adres worden bepaald, en wat je kunt doen als iets onbekend blijft.'); ?>
 </div>
 
@@ -374,7 +374,7 @@ td {
 <thead>
 <tr>
     <th style="width: 22%;" data-sorteer="domein">Domein <span class="pijl">▲</span><?php echo hulpIcoon('hosting-domein', 'Het domein zoals bij de site ingesteld. Het icoontje opent de website, de naam gaat naar de site-instellingen (o.a. de FTP-gegevens).'); ?></th>
-    <th style="width: 16%;" data-sorteer="hostingpartij">Hostingpartij <span class="pijl"></span><?php echo hulpIcoon('hosting-hostingpartij', 'De partij waar de website draait - herkend aan de servernaam, de FTP-server of de eigenaar van het netwerk (RIPE). Beweeg over de naam om te zien waaraan die herkend is.'); ?></th>
+    <th style="width: 16%;" data-sorteer="hostingpartij">Hostingpartij <span class="pijl"></span><?php echo hulpIcoon('hosting-hostingpartij', 'De partij waar de website draait - herkend aan de servernaam, aan wie het IP-blok is toegewezen, de FTP-server of de eigenaar van het netwerk (RIPE). Beweeg over de naam om te zien waaraan die herkend is.'); ?></th>
     <th style="width: 22%;" data-sorteer="server">Server <span class="pijl"></span><span class="filter-knop" id="filter-knop-server" title="Filteren op server" onclick="openServerFilter(event)">▾</span><?php echo hulpIcoon('hosting-server', 'De naam van de server waar de website op draait (reverse DNS van het IP-adres), met daaronder het netwerk (AS-nummer). Met het pijltje ▾ filter je op één of meer servers.'); ?></th>
     <th style="width: 14%;" data-sorteer="ip">IP-adres <span class="pijl"></span><?php echo hulpIcoon('hosting-ip', 'Het IP-adres van de server. Achter Cloudflare e.d. is dat het IP-adres van de FTP-server; het IP-adres van de domeinnaam staat er dan klein onder.'); ?></th>
     <th style="width: 26%;" data-sorteer="toelichting">Toelichting <span class="pijl"></span><?php echo hulpIcoon('hosting-toelichting', 'Bijzonderheden per site, zoals Cloudflare, een FTP-server die naar een andere machine wijst, of een opzoeking die mislukte. Daaronder de FTP-server en de nameservers.'); ?></th>
@@ -456,6 +456,7 @@ function vulRij(rij, info) {
     // Hostingpartij
     if (info.hostingpartij) {
         const titel = 'Herkend via ' + (info.herkend_via || '?')
+            + (info.ip_toewijzing ? '\nIP-blok toegewezen aan: ' + info.ip_toewijzing : '')
             + (info.netwerk_eigenaar ? '\nNetwerk: AS' + info.netwerk_asn + ' ' + info.netwerk_eigenaar : '');
         celHosting.innerHTML = '<strong title="' + escapeHtml(titel) + '">' + escapeHtml(info.hostingpartij) + '</strong>'
             + (info.cdn ? '<span class="cdn-badge" title="Website draait achter ' + escapeHtml(info.cdn) + '">via ' + escapeHtml(info.cdn) + '</span>' : '');
@@ -757,7 +758,7 @@ function sorteer(kolom, oplopend) {
 }
 
 function downloadCsv() {
-    const kop = ['Domein', 'Hostingpartij', 'Herkend via', 'Server', 'IP-adres', 'Website-IP', 'FTP-server', 'FTP-IP', 'Netwerk (AS)', 'Netwerkeigenaar', 'CDN', 'Nameservers', 'Toelichting'];
+    const kop = ['Domein', 'Hostingpartij', 'Herkend via', 'Server', 'IP-adres', 'Website-IP', 'FTP-server', 'FTP-IP', 'IP-toewijzing', 'Netwerk (AS)', 'Netwerkeigenaar', 'CDN', 'Nameservers', 'Toelichting'];
     const regels = [kop];
     alleRijen().forEach(rij => {
         const info = gegevens[rij.dataset.siteId] || {};
@@ -770,6 +771,7 @@ function downloadCsv() {
             (info.website_ips || []).join(' '),
             info.ftp_host || '',
             (info.ftp_ips || []).join(' '),
+            info.ip_toewijzing || '',
             info.netwerk_asn ? 'AS' + info.netwerk_asn : '',
             info.netwerk_eigenaar || '',
             info.cdn || '',

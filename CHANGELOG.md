@@ -1,5 +1,20 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.28 - 2026-09-30
+
+### Hostingoverzicht: de werkelijke hostingpartij in plaats van de technische naam erachter (`hosting_functies.php`, `hosting_overzicht.php`)
+Het hostingoverzicht toonde soms de naam van het netwerk of datacenter in plaats van de partij waar het hostingpakket wordt afgenomen - bijvoorbeeld **ZXCS** voor sites bij Vimexx.
+- **Vimexx in plaats van ZXCS**: de servers van Vimexx heten `webNNNN.zxcs.nl` en het netwerk heet "AS-ZXCS Stichting DIGI NL", maar de IP-blokken van die servers staan in RIPE op naam van VIMEXX (`NL-VIMEXX-SHARED`, `NL-VIMEXX-DEDICATED`). ZXCS wordt nu als infrastructuurpartij behandeld: de hostingpartij volgt per site uit de IP-toewijzing, zonder vaste koppeling ZXCS = Vimexx. Lukt die opzoeking niet, dan blijft er ZXCS staan.
+- **Generiek: IP-toewijzing (RIPE)**: per server-IP wordt nu ook opgevraagd aan wie dát specifieke IP-blok is toegewezen (RIPEstat `whois`, het inetnum-object: netname, omschrijving, organisatie). Dat is vaak specifieker dan de netwerkeigenaar. Een hostingpartij die ruimte huurt bij een datacenter heeft het datacenter als netwerkeigenaar, maar het IP-blok staat meestal op naam van de hostingpartij zelf.
+- **Datacenters en cloudplatforms tellen pas als laatste**: ZXCS, Previder, BIT, Serverius, WorldStream, Leaseweb, Hetzner, OVHcloud, DigitalOcean, Linode, Vultr, AWS, Google Cloud en Azure worden nog steeds herkend, maar alleen gebruikt als er geen specifiekere hostingpartij te vinden is (nieuwe `haalInfrastructuurpartijen()`). Wordt niets bekends herkend, dan wordt de naam uit de IP-toewijzing getoond, behalve als die nietszeggend is ("customer network", een adres) of de site zelf noemt; anders, zoals voorheen, de netwerkeigenaar.
+- **Extra herkenning van servernamen**: `*.hstgr.io` (Hostinger), `*.kundenserver.de` (IONOS), `*.sgvps.net` (SiteGround), `argewebhosting.nl` (Argeweb), plus Contabo, Previder en BIT.
+- De tooltip bij de hostingpartij toont nu ook aan wie het IP-blok is toegewezen, en de CSV-download heeft een extra kolom **IP-toewijzing**. Helppagina (hoofdstuk 13, Hostingpartij) bijgewerkt.
+- Een mislukte opzoeking van de IP-toewijzing is geen fout: dan werkt de herkenning zoals voorheen (servernaam, FTP-server, netwerkeigenaar).
+
+### Getest
+- Nagebootste scenario's met echte RIPE-gegevens: Vimexx met en zonder servernaam (en zonder IP-toewijzing), een hostingpartij die ruimte huurt bij een datacenter (met en zonder bekende naam), servernamen van bekende partijen, een nietszeggend Leaseweb-klantblok, een IP-blok op naam van de site zelf, en een onbekende partij zonder IP-toewijzing.
+- Woordgrenzen: klantdomeinen en bedrijfsnamen als "Orbit B.V." worden niet ten onrechte herkend.
+
 ## 1.27 - 2026-09-29
 
 ### Nieuw: hostingoverzicht (`hosting_overzicht.php`)

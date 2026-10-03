@@ -1,5 +1,54 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.29 - 2026-10-03
+
+### Nieuwste versies van extensies waarvan de update-server websites blokkeert (nieuw: `feed_terugval_functies.php`, `feed_handmatige_versie.php`; `scan_template.php`, `ontvang_scan.php`, `start_scan.php`, `haal_versies_op.php`, `extensies.php`, `index.php`, `auto_migratie.php`)
+Sommige update-servers blokkeren verzoeken van websites met een botbeveiliging: in plaats van de update-feed komt er een captchapagina of een weigering (HTTP 403) terug. De extensie bleef dan bij alle sites "Onbekend", en bij "alles scannen" maakte het grote aantal verzoeken vlak na elkaar het alleen maar erger.
+
+**Het scanscript meldt zich nu als wat het is**
+- Het scanscript vroeg update-feeds op met de afzender van een gewone browser (browser-User-Agent plus browserspecifieke headers). Een "browser" die zich daarna niet als browser gedraagt, is juist wat een botbeveiliging als bot aanmerkt: op dezelfde site en server kon de eigen updatecontrole van Joomla dezelfde feed wél openen.
+- Feeds worden nu opgevraagd precies zoals Joomla's eigen updatecontrole dat doet: met Joomla's eigen afzender (inclusief de Joomla-versie van de site) en zonder bijzondere headers (`feedCurlOpties()`). Het scanscript draait op een Joomla-site en vraagt de update-feed van een daar geïnstalleerde extensie op, en zo meldt het verzoek zich nu ook.
+- De oude, browserachtige aanpak dient alleen nog als tweede poging bij een gewone fout (time-out, serverfout). Na een blokkade (captchapagina, HTTP 403/429) volgt geen tweede poging.
+- Vuistregel: kan Joomla zelf in de beheeromgeving van een site een feed openen, dan kan het scanscript op die site dat ook.
+
+**Feeds van blokkerende update-servers worden centraal en zelden opgehaald**
+- De monitor leert zelf welke update-servers blokkeren: een site die een captchapagina of HTTP 403/429 krijgt, meldt die server in het scanresultaat; een blokkade die de monitor zelf krijgt, telt ook. Geen vaste lijst met namen in de code; een server blijft 60 dagen na de laatste blokkade op de lijst.
+- Bij het starten van een scan geeft de monitor die servers mee aan het scanscript. De sites vragen zulke feeds dan niet meer zelf op (scanuitvoer: "CENTRAAL").
+- Per feed haalt hooguit eens per 12 uur één site de feed op, bij toerbeurt, en stuurt hem mee naar de monitor; die gebruikt hem voor alle sites. De monitor neemt alleen een echte feed met een versienummer over.
+- Mislukt het via een site, dan mag al na een uur een site op een andere server het proberen. De monitor onthoudt per site of het lukte of mislukte: sites waar het eerder lukte krijgen voorrang, sites waar het onlangs mislukte worden overgeslagen zolang er een andere kandidaat is.
+- Toewijzingen worden atomair geclaimd: ook bij gelijktijdige scans gaat er nooit meer dan één verzoek tegelijk naar dezelfde feed.
+- De monitor zelf vraagt zo'n feed alleen op als er geen site aan de beurt is geweest, en wacht na een eigen blokkade 3 dagen.
+- De laatst succesvol opgehaalde feed blijft bewaard: een tijdelijke blokkade maakt een extensie niet meer "Onbekend".
+- Staat hetzelfde pakket bij sommige sites met een net andere feed-URL geregistreerd, dan volstaat een bewaarde feed van dezelfde update-server waarin hetzelfde Joomla-element voorkomt.
+- Er komt hiervoor niets in de extensiecatalogus en er gaat niets naar Github. Joomla-kernonderdelen, onderdelen van pakketten die bewust niet los worden gecontroleerd, en taalbestanden doen niet mee.
+
+**Extensieoverzicht: blok "Centraal opgehaalde update-feeds"**
+- Toont per feed van die site wanneer hij voor het laatst is opgehaald en hoe de laatste poging afliep.
+- Knop **"Probeer nu via deze site"**: scant die ene site opnieuw en laat haar de feeds zelf ophalen, zonder wachttijd. Lukt het, dan krijgen alle sites de versie meteen.
+- **Versie handmatig invullen**: link om de feed in de eigen browser te openen, plus een invoerveld voor het versienummer. Geldt meteen voor alle sites met die extensie, met de datum van invullen erbij; lukt het automatisch ophalen later weer, dan neemt dat het over. Alleen feeds die de monitor al uit een scan kent en alleen een geldig versienummer worden geaccepteerd.
+- Na een herscan van één site vult "Versies ophalen" de centraal bekende versies voor alle sites aan.
+
+**Overig**
+- Bugfix in de versiebepaling van het scanscript: de XML-declaratie bovenaan een feed telde mee als versiekandidaat, waardoor bij een geïnstalleerde versie in de 1-reeks een te lage "nieuwste versie" kon worden getoond.
+- Duidelijkere scanuitvoer bij een mislukte feed (HTTP-code, of "geblokkeerd door de botbeveiliging van de update-server"), en onder "=== MONITOR ===" welke versies de monitor heeft aangevuld.
+- Database: tabellen `feed_terugval_cache`, `feed_centrale_hosts`, `feed_site_ips` en `feed_site_resultaten` (migratiestap 23; worden zo nodig ook bij het eerste gebruik aangemaakt).
+
+### Site-instellingen: donkere modus en FTP/SFTP-tekst (`site_instellingen.php`)
+- De domeinnaam onder de kop "Site-instellingen" en het resultaatvak onder de knop om het scanscript te versturen waren in donkere modus nauwelijks leesbaar (vaste kleuren). Ze gebruiken nu de themakleuren.
+- Knop en meldingen noemen nu "FTP/SFTP", omdat het versturen ook via SFTP kan gaan.
+
+### Neutrale voorbeelden in invoervelden en helppagina (`extensie_beheer.php`, `site_toevoegen.php`, `site_instellingen.php`, `extensies.php`, `help.php`)
+- Voorbeeldteksten in invoervelden bevatten geen namen van extensies, versienummers of domeinnamen meer, maar een korte omschrijving van wat er ingevuld moet worden.
+- De helppagina noemt geen specifieke extensies, hostingpartijen, versienummers of domeinnamen meer, en is bijgewerkt voor het bovenstaande (hoofdstuk 10 en 14).
+
+### Getest
+- Een nagebootste update-server die een "browser" een captchapagina geeft en Joomla de feed: het scanscript krijgt de feed in één verzoek. Een server die de Joomla-afzender met een serverfout afwijst: tweede poging slaagt. HTTP 403: geen tweede poging.
+- Toerbeurt, wachttijden, voorkeur voor sites waar het lukte, "andere server na een uur", en acht tot tien gelijktijdige processen: steeds precies één toewijzing of verzoek per feed.
+- Aangeleverde feeds: echte feed overgenomen en bij andere sites juist toegepast; captchapagina en willekeurige tekst geweigerd.
+- Handmatige versie: opslaan, doorwerking naar alle sites en naar een verwante feed-URL, wissen, voorrang van een later automatisch opgehaalde feed, weigering van ongeldige invoer en van een onbekende feed.
+- Volledige keten met een echte MariaDB (scan ontvangen, versies aanvullen, catalogus-opruiming, extensieoverzicht), inclusief een upgrade vanaf een database van de vorige versie.
+- `php -l` op alle gewijzigde bestanden; regeleinden gecontroleerd (CRLF, geen `\r\r\n`).
+
 ## 1.28 - 2026-09-30
 
 ### Hostingoverzicht: de werkelijke hostingpartij in plaats van de technische naam erachter (`hosting_functies.php`, `hosting_overzicht.php`)

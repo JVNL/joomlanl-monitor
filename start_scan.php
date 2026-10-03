@@ -33,6 +33,7 @@ set_time_limit(0);
 require_once 'config.php';
 require_once 'endpoint_beveiliging.php';
 require_once 'instellingen_functies.php';
+require_once 'feed_terugval_functies.php';
 
 // Alleen-status-modus (gebruikt door beveiliging.php bij "Herscan alleen deze website"): geeft
 // terug wanneer het meest recente scanresultaat van deze site BIJ DE MONITOR is aangekomen, zonder
@@ -153,6 +154,32 @@ function haalPhpFoutUitAntwoord(string $inhoud): ?string
 
 function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden = 30): array
 {
+    // Update-servers die websites blokkeren (bijv. de botbeveiliging van
+    // SiteGround bij Balbooa) haalt de monitor centraal op; het scanscript
+    // krijgt ze mee als "niet zelf opvragen" (sinds 1.29, zie
+    // feed_terugval_functies.php). Eén keer per verzoek bepalen.
+    static $centraleFeedHostsParameter = null;
+    // Sinds 1.29: per feed van zo'n server mag hooguit eens per 12 uur
+    // één site (bij toerbeurt) de feed toch zelf ophalen en doorgeven aan
+    // de monitor (?cfp=...). Bij de eerste aanroep bepaald voor alle sites;
+    // een herhaalpoging hergebruikt dezelfde toewijzing.
+    static $proefFeedsPerDomein = [];
+    if ($centraleFeedHostsParameter === null) {
+        global $pdo;
+        $centraleFeedHostsParameter = centraleFeedHostsQueryParameter($pdo);
+        if ($centraleFeedHostsParameter !== '') {
+            // "Probeer nu via deze site" op het extensieoverzicht (sinds
+            // 1.29): bij een herscan van precies één site met
+            // ?proef_nu=1 krijgt die site de feeds direct toegewezen, zonder
+            // de wachttijd af te wachten.
+            if (!empty($_GET['proef_nu']) && isset($_GET['site_id']) && count($sites) === 1) {
+                $proefFeedsPerDomein = forceerProefFeedsVoorSite($pdo, (string) reset($sites)['domein']);
+            } else {
+                $proefFeedsPerDomein = bepaalProefFeedsVoorSites($pdo, array_column($sites, 'domein'));
+            }
+        }
+    }
+
     $multiHandle = curl_multi_init();
     $handles = [];
     $verversCodes = [];
@@ -170,7 +197,8 @@ function startScansParallel(array $sites, int $poging = 1, int $timeoutSeconden 
 
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => bepaalVerseScanUrl($site, $bestandsnaam, $verversCode),
+            CURLOPT_URL => bepaalVerseScanUrl($site, $bestandsnaam, $verversCode) . $centraleFeedHostsParameter
+                . (!empty($proefFeedsPerDomein[$domein]) ? '&cfp=' . implode(',', $proefFeedsPerDomein[$domein]) : ''),
             CURLOPT_HTTPHEADER => ['Cache-Control: no-cache', 'Pragma: no-cache'],
             CURLOPT_HEADERFUNCTION => function ($ch, $regel) use (&$antwoordKoppen, $index) {
                 $delen = explode(':', $regel, 2);

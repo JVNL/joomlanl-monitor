@@ -39,6 +39,11 @@ require_once 'csrf_functies.php';
 require_once 'verdacht_functies.php';
 require_once 'versie_vergelijk_functies.php';
 require_once 'instellingen_functies.php';
+require_once 'feed_terugval_functies.php';
+
+// Update-servers die websites blokkeren: het 📋-icoontje (scanscript los
+// openen) geeft ze mee, net als start_scan.php (sinds 1.29).
+$centraleFeedHostsParameter = centraleFeedHostsQueryParameter($pdo);
 
 $programmaNaam = trim(haalInstelling($pdo, 'email_afzendernaam', '')) ?: 'Mijn Websites Monitor';
 
@@ -1327,7 +1332,7 @@ if ($richting === 'omgekeerd') {
             <span class="rij-spinner" id="spinner-<?php echo (int) $site['id']; ?>" title="Bezig met scannen..." style="display: none;">⏳</span>
             <button type="button" class="knop-icoon knop-ververs-icoon" onclick="scanEnkeleSite(<?php echo (int) $site['id']; ?>, this)" title="Alleen deze website opnieuw scannen">↻</button>
             <a class="knop-icoon" href="site_instellingen.php?site_id=<?php echo (int) $site['id']; ?>" title="Site-instellingen"><span class="icoon-glyph">⚙️</span></a>
-            <a class="knop-icoon" href="<?php echo htmlspecialchars(bepaalVerseScanUrl($site, bepaalScanBestandsnaam($site))); ?>" data-basis="<?php echo htmlspecialchars(bepaalSiteUrl($site, bepaalScanBestandsnaam($site))); ?>" onmousedown="this.href = this.dataset.basis + '?nc=' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);" target="_blank" rel="noopener" title="Scanscript rechtstreeks openen (altijd een verse scan, nooit een oude uitvoer uit een cache)"><span class="icoon-glyph">📋</span></a>
+            <a class="knop-icoon" href="<?php echo htmlspecialchars(bepaalVerseScanUrl($site, bepaalScanBestandsnaam($site)) . $centraleFeedHostsParameter); ?>" data-basis="<?php echo htmlspecialchars(bepaalSiteUrl($site, bepaalScanBestandsnaam($site))); ?>" data-extra="<?php echo htmlspecialchars($centraleFeedHostsParameter); ?>" onmousedown="this.href = this.dataset.basis + '?nc=' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + (this.dataset.extra || '');" target="_blank" rel="noopener" title="Scanscript rechtstreeks openen (altijd een verse scan, nooit een oude uitvoer uit een cache)"><span class="icoon-glyph">📋</span></a>
             <?php if ($ftpClientUrl !== null): ?>
             <a class="knop-icoon" href="<?php echo htmlspecialchars($ftpClientUrl); ?>"
                 <?php if ($ftpGebruikersnaamKopieren !== null): ?>

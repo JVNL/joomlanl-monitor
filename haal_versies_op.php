@@ -599,7 +599,68 @@ foreach ($sites as $site) {
     @file_put_contents(__DIR__ . '/joomla_debug.log', '[' . date('Y-m-d H:i:s') . "] $regel\n", FILE_APPEND | LOCK_EX);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Fase 3 (sinds 1.29): nieuwste versie via de monitor
+// voor update-feeds die vanaf de site zelf niet op te halen waren, of die
+// het scanscript bewust heeft overgeslagen omdat de update-server websites
+// blokkeert (centraal opgehaald, hooguit eens per 12 uur per feed). Normaal gebeurt dit al direct bij
+// het ontvangen van een scan (ontvang_scan.php); dit is het vangnet voor
+// bestaande scanresultaten, en voor feeds waarvan een eerdere poging nog in
+// de korte "mislukt"-wachttijd zat. Zie feed_terugval_functies.php.
+// ─────────────────────────────────────────────────────────────────────────────
+require_once 'feed_terugval_functies.php';
+
+$terugvalLog = [];
+try {
+    $terugvalSql = "
+        SELECT sae.site_id, sae.extension_id, sae.naam, sae.type, sae.element, sae.folder,
+               sae.versie, sae.nieuwste_versie, sae.update_feed_url, sae.auteur, sae.package_id,
+               s.domein
+        FROM site_alle_extensies sae
+        JOIN sites s ON s.id = sae.site_id
+        WHERE sae.update_feed_url IS NOT NULL AND sae.update_feed_url != ''
+          AND (sae.nieuwste_versie IS NULL OR sae.nieuwste_versie = '')
+    ";
+    // Bewust ALTIJD voor alle sites, ook bij ?site_id= (sinds 1.29): heeft
+    // één site zojuist een feed opgehaald die voor alle sites geldt, dan
+    // krijgen de andere sites die versie meteen ook - zonder dat daarvoor
+    // eerst alle sites opnieuw gescand of "Versies ophalen" gedraaid hoeft
+    // te worden. Dit kost geen extra verzoeken naar update-servers: daarvoor
+    // gelden de wachttijden in feed_terugval_functies.php.
+    $terugvalStmt = $pdo->query($terugvalSql);
+    $terugvalRijen = $terugvalStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $terugvalVerslag = vulNieuwsteVersiesAanViaMonitor($pdo, $terugvalRijen);
+
+    $terugvalUpdateStmt = $pdo->prepare("
+        UPDATE site_alle_extensies
+        SET nieuwste_versie = ?
+        WHERE site_id = ? AND extension_id = ?
+          AND (nieuwste_versie IS NULL OR nieuwste_versie = '')
+    ");
+    foreach ($terugvalVerslag['gelukt'] as $item) {
+        $rij = $terugvalRijen[$item['index']];
+        $terugvalUpdateStmt->execute([$item['versie'], $rij['site_id'], $rij['extension_id']]);
+        $bron = $item['vers'] ? 'zojuist opgehaald' : 'opgehaald op ' . date('d-m-Y H:i', strtotime((string) $item['laatst_gelukt_op']));
+        if (!empty($item['handmatig'])) {
+            $bron = 'handmatig ingevuld op ' . date('d-m-Y H:i', strtotime((string) $item['laatst_gelukt_op']));
+        } elseif ($item['fout'] !== null && !$item['vers']) {
+            $bron = 'laatst bekende versie, ' . $bron . ' - laatste poging: ' . $item['fout'];
+        }
+        $terugvalLog[] = "{$rij['domein']}: {$item['naam']} => {$item['versie']} ($bron)";
+    }
+    foreach ($terugvalVerslag['mislukt'] as $item) {
+        $rij = $terugvalRijen[$item['index']];
+        $terugvalLog[] = "{$rij['domein']}: {$item['naam']} - NIET gelukt: {$item['reden']} (feed: {$item['feed']})";
+    }
+} catch (\Throwable $e) {
+    $terugvalLog[] = 'Terugval kon niet worden uitgevoerd: ' . $e->getMessage();
+}
+
 echo implode("\n", $log);
 echo "\n\nNieuwste beschikbare versies:\n" . implode("\n", $nieuwsteLog) . "\n";
 echo "(let op: extensies zonder update_feed_url in de catalogus, zoals yootheme, worden niet automatisch opgehaald)\n";
+if (!empty($terugvalLog)) {
+    echo "\nTerugval via de monitor (feeds die vanaf de site zelf niet op te halen waren):\n" . implode("\n", $terugvalLog) . "\n";
+}
 echo "\n" . date('Y-m-d H:i:s') . " - klaar.\n";

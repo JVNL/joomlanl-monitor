@@ -672,11 +672,11 @@ input[type="url"] {
 
         <label for="sleutel">Sleutel</label>
         <div class="uitleg">Een korte technische code voor deze extensie, bijv. <code>sef</code> of <code>rsform</code>. Alleen kleine letters, cijfers en underscores (_), geen spaties. Wordt intern gebruikt om de extensie te herkennen.</div>
-        <input type="text" id="sleutel" name="sleutel" required pattern="[a-z0-9_]+" placeholder="bijv. sef">
+        <input type="text" id="sleutel" name="sleutel" required pattern="[a-z0-9_]+" placeholder="korte sleutel, alleen kleine letters, cijfers en _">
 
         <label for="label">Label</label>
         <div class="uitleg">De naam zoals die getoond wordt in de overzichten, bijv. "SEF Advance" of "RSForm Pro".</div>
-        <input type="text" id="label" name="label" required placeholder="bijv. SEF Advance">
+        <input type="text" id="label" name="label" required placeholder="naam van de extensie">
 
         <label for="manifest_pad">Manifest-pad <span style="font-weight: normal;">(optioneel)</span></label>
         <div class="uitleg">
@@ -685,11 +685,11 @@ input[type="url"] {
             &bull; <code>components/com_&lt;naam&gt;/&lt;naam&gt;.xml</code> (bij een los component)<br>
             Laat dit leeg als je alleen een update-feed-URL wil koppelen aan een al automatisch gedetecteerde extensie.
         </div>
-        <input type="text" id="manifest_pad" name="manifest_pad" placeholder="bijv. manifests/packages/pkg_sef.xml">
+        <input type="text" id="manifest_pad" name="manifest_pad" placeholder="pad naar het manifestbestand (optioneel)">
 
         <label for="update_feed_url">Update-feed-URL <span style="font-weight: normal;">(optioneel)</span></label>
         <div class="uitleg">Als deze extensie een publieke update-XML-feed heeft, kan die hier ingevuld worden - dan wordt automatisch bijgehouden of de geïnstalleerde versie up-to-date is. Laat dit leeg als je geen publieke feed kent; de extensie wordt dan gewoon gedetecteerd, maar de status blijft "Onbekend" in plaats van te gokken.</div>
-        <input type="url" id="update_feed_url" name="update_feed_url" placeholder="bijv. https://voorbeeld.nl/updates/pkg_sef.xml">
+        <input type="url" id="update_feed_url" name="update_feed_url" placeholder="volledig adres van de update-feed (https://...)">
 
         <div class="knop-rij">
             <button type="submit" class="knop toevoegen">Toevoegen</button>
@@ -736,7 +736,7 @@ input[type="url"] {
         <form method="post" class="feed-form">
             <?php echo csrfVeld(); ?>
             <input type="hidden" name="sleutel" value="<?php echo htmlspecialchars($extensie['sleutel']); ?>">
-            <textarea name="update_feed_url" rows="2" placeholder="https://voorbeeld.nl/updates/pkg_x.xml"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
+            <textarea name="update_feed_url" rows="2" placeholder="volledig adres van de update-feed (https://...)"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
             <?php if ($githubTokenIngesteld): ?>
             <div style="display: flex; flex-direction: column; gap: 4px;">
                 <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan met GitHub Sync</button>
@@ -832,7 +832,7 @@ input[type="url"] {
         <form method="post" class="feed-form">
             <?php echo csrfVeld(); ?>
             <input type="hidden" name="sleutel" value="<?php echo htmlspecialchars($extensie['sleutel']); ?>">
-            <textarea name="update_feed_url" rows="2" placeholder="https://voorbeeld.nl/updates/pkg_x.xml"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
+            <textarea name="update_feed_url" rows="2" placeholder="volledig adres van de update-feed (https://...)"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
             <?php if ($githubTokenIngesteld): ?>
             <div style="display: flex; flex-direction: column; gap: 4px;">
                 <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan met GitHub Sync</button>

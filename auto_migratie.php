@@ -509,6 +509,25 @@ function haalMigraties(): array
             }
         },
 
+        // ----------------------------------------------------------------
+        // Stap 23 (versie 1.29): centraal ophalen van update-feeds van
+        // update-servers die verzoeken van websites blokkeren. Alle tabellen
+        // hiervoor (feed_terugval_cache, feed_centrale_hosts, feed_site_ips,
+        // feed_site_resultaten) worden op één plek aangemaakt en bijgewerkt:
+        // zorgVoorFeedTerugvalTabel() in feed_terugval_functies.php. Die
+        // functie is idempotent en wordt ook bij het eerste gebruik zelf
+        // aangeroepen, zodat het ook werkt op een installatie die de
+        // automatische migratie niet bij het opstarten draait.
+        //
+        // De nummers 19 t/m 22 zijn bewust niet in gebruik (tijdens de
+        // ontwikkeling van 1.29 gebruikt voor tussenstappen die hierin zijn
+        // opgegaan) - een volgende stap krijgt dus nummer 24.
+        // ----------------------------------------------------------------
+        23 => function (PDO $pdo) {
+            require_once __DIR__ . '/feed_terugval_functies.php';
+            zorgVoorFeedTerugvalTabel($pdo);
+        },
+
     ];
 }
 

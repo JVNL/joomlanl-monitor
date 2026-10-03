@@ -499,9 +499,9 @@ label.categorie-optie {
         </label>
     </div>
 
-    <label for="domein">Domein<?php echo hulpIcoon('sites-toevoegen', 'Staan er meerdere, losse Joomla-installaties op hetzelfde hostingaccount (bijv. eigen submappen)? Vul dan de submap achter het domein in, bijv. voorbeeld.nl/submap - het scanscript herkent dan automatisch in welke map het zelf draait.'); ?></label>
-    <div class="uitleg">De domeinnaam van de website, zonder "https://" of "www.", bijv. <code>voorbeeld.nl</code>.</div>
-    <input type="text" id="domein" name="domein" required placeholder="bijv. voorbeeld.nl" value="<?php echo htmlspecialchars($_POST['domein'] ?? ''); ?>">
+    <label for="domein">Domein<?php echo hulpIcoon('sites-toevoegen', 'Staan er meerdere, losse Joomla-installaties op hetzelfde hostingaccount (bijv. eigen submappen)? Vul dan de submap achter het domein in, gescheiden door een schuine streep - het scanscript herkent dan automatisch in welke map het zelf draait.'); ?></label>
+    <div class="uitleg">De domeinnaam van de website, zonder "https://" of "www." ervoor.</div>
+    <input type="text" id="domein" name="domein" required placeholder="domeinnaam, zonder https://" value="<?php echo htmlspecialchars($_POST['domein'] ?? ''); ?>">
 
     <label for="admin_pad">Admin-pad</label>
     <div class="uitleg">
@@ -514,8 +514,8 @@ label.categorie-optie {
     <label for="url_subpad">URL-submap (alleen als de site niet in de webroot zelf staat)</label>
     <div class="uitleg">
         Staat Joomla niet los op het domein, maar in een submap die WEL rechtstreeks via de domeinnaam bereikbaar
-        is (bijv. <code>https://voorbeeld.nl/bieb/</code> in plaats van <code>https://voorbeeld.nl/</code>)? Vul dan
-        hier die submap in (bijv. <code>bieb</code>). <strong>Let op, dit is iets anders dan het FTP-pad
+        is (het adres van de site is dan de domeinnaam met die submap erachter)? Vul dan
+        hier alleen de naam van die submap in. <strong>Let op, dit is iets anders dan het FTP-pad
         hieronder:</strong> het FTP-pad bepaalt alleen waar het scanscript op de schijf terechtkomt, dit veld
         bepaalt via welke URL de monitor het scanscript daarna kan bereiken - die twee hoeven niet overeen te komen.
         Voor verreweg de meeste sites laat je dit gewoon leeg.
@@ -565,8 +565,8 @@ label.categorie-optie {
     </div>
 
     <label for="ftp_host">Server</label>
-    <div class="uitleg">Bijv. <code>ftp.voorbeeld.nl</code>, <code>ssh.voorbeeld.nl</code>, of een IP-adres.</div>
-    <input type="text" id="ftp_host" name="ftp_host" placeholder="ftp.voorbeeld.nl" value="<?php echo htmlspecialchars($_POST['ftp_host'] ?? ''); ?>">
+    <div class="uitleg">De servernaam die je van de hostingpartij hebt gekregen, of een IP-adres.</div>
+    <input type="text" id="ftp_host" name="ftp_host" placeholder="adres van de FTP-/SFTP-server" value="<?php echo htmlspecialchars($_POST['ftp_host'] ?? ''); ?>">
 
     <div class="ftp-rij">
         <div>

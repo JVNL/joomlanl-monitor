@@ -15,6 +15,7 @@ header('Pragma: no-cache');
 require_once 'config.php';
 require_once 'versie_vergelijk_functies.php';
 require_once 'csrf_functies.php';
+require_once 'feed_terugval_functies.php';
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
@@ -277,6 +278,78 @@ tr.genegeerd-rij td {
     margin-bottom: 0;
 }
 
+
+.centrale-feeds {
+    margin-bottom: 15px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    background: var(--thema-badge-bg);
+    border: 1px solid var(--thema-rand);
+    color: var(--thema-tekst);
+    font-size: 12px;
+}
+
+.centrale-feeds-uitleg {
+    color: var(--thema-uitleg-tekst);
+    margin: 4px 0 6px 0;
+}
+
+.centrale-feeds ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.centrale-feeds-fout {
+    color: var(--thema-geel);
+}
+
+.centrale-feeds-ok {
+    color: var(--thema-groen);
+}
+
+.centrale-feeds li {
+    margin-bottom: 8px;
+}
+
+.centrale-feeds-proef {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 8px 0;
+}
+
+.centrale-feeds-proef .knop {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.centrale-feeds-proef .centrale-feeds-uitleg {
+    margin: 0;
+}
+
+.centrale-feeds-handmatig {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.centrale-feeds-handmatig input[type="text"] {
+    width: 110px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+.centrale-feeds-handmatig .knop {
+    padding: 3px 10px;
+    font-size: 12px;
+}
+
+.centrale-feeds-handmatig .centrale-feeds-uitleg {
+    margin: 0;
+}
 </style>
 <?php include 'responsive_stijlen.php'; ?>
 </head>
@@ -306,6 +379,18 @@ tr.genegeerd-rij td {
 
 <div id="melding" style="display: none; margin-bottom: 15px; padding: 8px 12px; border-radius: 4px; font-size: 13px;"></div>
 
+<?php if (isset($_GET['feed_versie'])): ?>
+<div class="melding <?php echo $_GET['feed_versie'] === 'ongeldig' ? 'fout' : 'ok'; ?>" style="margin-bottom: 15px; padding: 10px 14px; border-radius: 4px; border: 1px solid; font-size: 13px;">
+    <?php if ($_GET['feed_versie'] === 'opgeslagen'): ?>
+        ✅ Nieuwste versie opgeslagen - geldt voor alle sites met deze extensie.
+    <?php elseif ($_GET['feed_versie'] === 'gewist'): ?>
+        ✅ Handmatig ingevulde versie gewist.
+    <?php else: ?>
+        ❌ Niet opgeslagen: vul alleen het versienummer in, zoals het in de feed staat.
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
 <?php if (isset($_GET['genegeerd'])): ?>
 <div style="margin-bottom: 15px; padding: 10px 14px; border-radius: 4px; background: #d4edda; color: #155724; border: 1px solid #c3e6cb; font-size: 13px;">
     ✅ Extensie genegeerd - komt niet meer terug in het overzicht, op geen enkele site die 'm gebruikt. Terug te draaien via "Extensietabel beheren", of via de knop "Toon ook genegeerde extensies" hierboven.
@@ -323,6 +408,87 @@ tr.genegeerd-rij td {
     Automatisch gedetecteerd rechtstreeks uit de database van de site (Joomla-kernonderdelen zijn eruit gefilterd).
     De nieuwste versie wordt - waar bekend - rechtstreeks door de site zelf opgehaald via Joomla's eigen geregistreerde update-locatie per extensie.
 </div>
+
+<?php
+// Sinds 1.29: feeds van update-servers die websites blokkeren, haalt de
+// monitor centraal op (hooguit eens per 12 uur). Hier per feed die deze site
+// gebruikt: wanneer dat voor het laatst lukte - zo is te zien hoe vers de
+// getoonde "nieuwste versie" is.
+$centraleFeedRegels = [];
+$centraalOverzicht = haalCentraleFeedOverzicht($pdo);
+if (!empty($centraalOverzicht)) {
+    $siteFeedStmt = $pdo->prepare("
+        SELECT DISTINCT update_feed_url, naam FROM site_alle_extensies
+        WHERE site_id = ? AND update_feed_url IS NOT NULL AND update_feed_url != '' AND package_id = 0
+    ");
+    $siteFeedStmt->execute([$id]);
+    $namenPerFeed = [];
+    foreach ($siteFeedStmt->fetchAll(PDO::FETCH_ASSOC) as $rij) {
+        $namenPerFeed[$rij['update_feed_url']][] = $rij['naam'];
+    }
+    foreach ($centraalOverzicht as $host => $info) {
+        foreach ($info['feeds'] as $feed) {
+            if (!isset($namenPerFeed[$feed['feed_url']])) {
+                continue;
+            }
+            $centraleFeedRegels[] = [
+                'namen'            => implode(', ', array_unique($namenPerFeed[$feed['feed_url']])),
+                'host'             => $host,
+                'laatst_gelukt_op' => $feed['laatst_gelukt_op'],
+                'fout'             => $feed['fout'],
+                'proef_op'         => $feed['proef_op'] ?? null,
+                'proef_uitkomst'   => $feed['proef_uitkomst'] ?? null,
+                'feed_url'         => $feed['feed_url'],
+                'handmatige_versie' => $feed['handmatige_versie'] ?? null,
+                'handmatig_op'     => $feed['handmatig_op'] ?? null,
+            ];
+        }
+    }
+}
+?>
+<?php if (!empty($centraleFeedRegels)): ?>
+<div class="centrale-feeds">
+    <strong>🛰️ Centraal opgehaalde update-feeds</strong>
+    <div class="centrale-feeds-uitleg">
+        Deze update-servers blokkeren verzoeken als er veel tegelijk komen. Daarom haalt hooguit eens per 12 uur één van je sites (bij toerbeurt)
+        zo'n feed op, en geldt het resultaat voor alle sites. Lukt dat (tijdelijk) niet, dan blijft de laatst bekende versie staan.
+        Weigert de update-server alle automatische verzoeken, open de feed dan zelf en vul het versienummer hieronder in.
+    </div>
+    <div class="centrale-feeds-proef">
+        <button type="button" class="knop" onclick="herscanDezeSite(this, '&amp;proef_nu=1')" title="Scant deze site opnieuw en laat haar daarbij de feeds hieronder zelf ophalen, zonder de wachttijd af te wachten">🚀 Probeer nu via deze site</button>
+        <span class="centrale-feeds-uitleg">Handig bij een site waar Joomla zelf (Extensies &gt; Updaten) de feed wel kan openen. Lukt het, dan geldt het resultaat meteen voor alle sites, en krijgt deze site voortaan voorrang.</span>
+    </div>
+    <ul>
+    <?php foreach ($centraleFeedRegels as $regel): ?>
+        <li>
+            <strong><?php echo htmlspecialchars($regel['namen']); ?></strong> (<?php echo htmlspecialchars($regel['host']); ?>):
+            <?php if (!empty($regel['laatst_gelukt_op'])): ?>
+                laatst opgehaald op <?php echo htmlspecialchars(date('d-m-Y \o\m H:i', strtotime($regel['laatst_gelukt_op']))); ?>
+            <?php else: ?>
+                <span class="centrale-feeds-fout">nog niet gelukt</span>
+            <?php endif; ?>
+            <?php if (!empty($regel['proef_op'])): ?>
+                <span class="<?php echo (strpos((string) $regel['proef_uitkomst'], 'gelukt via') === 0) ? 'centrale-feeds-ok' : 'centrale-feeds-fout'; ?>">- laatste poging via een site (<?php echo htmlspecialchars(date('d-m-Y H:i', strtotime($regel['proef_op']))); ?>): <?php echo htmlspecialchars($regel['proef_uitkomst'] === 'gestart' ? 'gestart, nog geen resultaat ontvangen' : (string) $regel['proef_uitkomst']); ?></span>
+            <?php elseif (!empty($regel['fout']) && $regel['fout'] !== 'nog niet opgehaald'): ?>
+                <span class="centrale-feeds-fout">- laatste poging door de monitor: <?php echo htmlspecialchars($regel['fout']); ?></span>
+            <?php endif; ?>
+            <form method="post" action="feed_handmatige_versie.php" class="centrale-feeds-handmatig">
+                <?php echo csrfVeld(); ?>
+                <input type="hidden" name="site_id" value="<?php echo (int) $id; ?>">
+                <input type="hidden" name="feed_url" value="<?php echo htmlspecialchars($regel['feed_url']); ?>">
+                <a href="<?php echo htmlspecialchars($regel['feed_url']); ?>" target="_blank" rel="noopener noreferrer">🔗 Open de feed in je browser</a>
+                <span>en vul de nieuwste versie in:</span>
+                <input type="text" name="versie" value="<?php echo htmlspecialchars((string) $regel['handmatige_versie']); ?>" placeholder="versienummer" maxlength="31" pattern="[0-9][0-9A-Za-z.\-]*" title="Het versienummer uit de feed - leeg laten om de handmatige versie te wissen">
+                <button type="submit" class="knop">Opslaan</button>
+                <?php if (!empty($regel['handmatige_versie'])): ?>
+                    <span class="centrale-feeds-uitleg">handmatig ingevuld op <?php echo htmlspecialchars(date('d-m-Y \o\m H:i', strtotime((string) $regel['handmatig_op']))); ?> - geldt voor alle sites met deze extensie, totdat het automatisch ophalen weer lukt</span>
+                <?php endif; ?>
+            </form>
+        </li>
+    <?php endforeach; ?>
+    </ul>
+</div>
+<?php endif; ?>
 
 <div class="uitleg-statussen">
     <div><span class="status-badge status-groen">Up-to-date</span> — de geïnstalleerde versie is gelijk aan of nieuwer dan de nieuwste bekende versie.</div>
@@ -406,7 +572,7 @@ tr.genegeerd-rij td {
 <script>
 const SITE_ID_HERSCAN = <?php echo (int) $id; ?>;
 
-function herscanDezeSite(knop) {
+function herscanDezeSite(knop, extraParameter) {
     knop.disabled = true;
 
     const melding = document.getElementById('melding');
@@ -416,7 +582,7 @@ function herscanDezeSite(knop) {
     melding.style.color = '#333';
     melding.textContent = '⏳ Scan wordt gestart voor deze website...';
 
-    fetch('start_scan.php?site_id=' + SITE_ID_HERSCAN)
+    fetch('start_scan.php?site_id=' + SITE_ID_HERSCAN + (extraParameter || ''))
         .then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
             return r.text();

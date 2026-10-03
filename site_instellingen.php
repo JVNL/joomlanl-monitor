@@ -156,14 +156,14 @@ h1 {
 }
 
 .subtitel {
-    color: #555;
+    color: var(--thema-uitleg-tekst);
     margin-bottom: 20px;
 }
 
 .domein-titel {
     font-size: 18px;
     font-weight: bold;
-    color: #222;
+    color: var(--thema-tekst);
     margin-bottom: 20px;
 }
 
@@ -391,8 +391,8 @@ label.categorie-optie {
     <h2>URL-submap<?php echo hulpIcoon('site-instellingen', 'Alleen invullen als Joomla niet in de webroot zelf staat, maar in een submap die WEL rechtstreeks via de domeinnaam bereikbaar is - anders dan het FTP-pad hierboven, dat alleen bepaalt waar het bestand op de schijf terechtkomt.'); ?></h2>
     <div class="uitleg" style="margin-bottom: 15px;">
         Staat Joomla niet los op het domein, maar in een submap die WEL rechtstreeks via de domeinnaam bereikbaar is
-        (bijv. <code>https://<?php echo htmlspecialchars($site['domein'] ?? 'voorbeeld.nl'); ?>/bieb/</code> in
-        plaats van <code>https://<?php echo htmlspecialchars($site['domein'] ?? 'voorbeeld.nl'); ?>/</code>)? Vul
+        (bijv. <code>https://<?php echo htmlspecialchars($site['domein'] ?? 'domeinnaam'); ?>/submap/</code> in
+        plaats van <code>https://<?php echo htmlspecialchars($site['domein'] ?? 'domeinnaam'); ?>/</code>)? Vul
         dan hier die submap in. <strong>Let op, dit is iets anders dan het FTP-pad hieronder:</strong> dat bepaalt
         alleen waar het scanscript op de schijf terechtkomt, dit veld bepaalt via welke URL de monitor het
         scanscript daarna kan bereiken om te scannen - die twee hoeven niet overeen te komen. Voor verreweg de
@@ -440,7 +440,7 @@ label.categorie-optie {
 
         <label for="ftp_host">Server</label>
         <div class="uitleg">Bijv. <code>ftp.<?php echo htmlspecialchars($site['domein']); ?></code>, <code>ssh.<?php echo htmlspecialchars($site['domein']); ?></code>, of een IP-adres.</div>
-        <input type="text" id="ftp_host" name="ftp_host" placeholder="ftp.voorbeeld.nl" value="<?php echo htmlspecialchars($site['ftp_host'] ?? ''); ?>">
+        <input type="text" id="ftp_host" name="ftp_host" placeholder="adres van de FTP-/SFTP-server" value="<?php echo htmlspecialchars($site['ftp_host'] ?? ''); ?>">
 
         <div class="ftp-rij">
             <div>
@@ -507,7 +507,7 @@ label.categorie-optie {
         <label for="extra_scan_pad_negeren">Nog extra (sub)mapnamen overslaan (optioneel, kommagescheiden)</label>
         <input type="text" name="extra_scan_pad_negeren" id="extra_scan_pad_negeren"
             value="<?php echo htmlspecialchars($site['extra_scan_pad_negeren'] ?? ''); ?>"
-            placeholder="bijv. Akeeba-Backup, of een eigen back-upmap">
+            placeholder="mapnamen, gescheiden door een komma">
         <div class="uitleg" style="margin-top: 8px;">
             Herkenbare hostingpartij-systeemmappen (bijv. <code>Maildir</code>, <code>.cagefs</code>, <code>.pki</code>,
             <code>.php</code>) worden al automatisch overgeslagen - daar hoef je hier dus niets voor in te vullen.
@@ -575,8 +575,8 @@ label.categorie-optie {
             druk op de knop rechtstreeks naar <strong><?php echo htmlspecialchars($site['domein']); ?></strong>
             laten versturen.
         </div>
-        <button type="button" class="knop ftp" onclick="verstuurFtp(this)">🚀 Verstuur scanscript nu via FTP naar deze site</button>
-        <div id="ftp-resultaat" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; font-family: monospace; background: #eef1f4; border: 1px solid #ddd;"></div>
+        <button type="button" class="knop ftp" onclick="verstuurFtp(this)">🚀 Verstuur scanscript nu via FTP/SFTP naar deze site</button>
+        <div id="ftp-resultaat" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; font-family: monospace; background: var(--thema-badge-bg); color: var(--thema-tekst); border: 1px solid var(--thema-rand);"></div>
         <button type="button" id="herstel-rechten-knop" class="knop" style="display: none; margin-top: 10px; background: #e67e22;" onclick="herstelMapRechten(this)">🔧 Probeer maprechten automatisch te herstellen (naar 755)</button>
         <div id="herstel-rechten-resultaat" style="display: none; margin-top: 8px; font-size: 12px;"></div>
     <?php else: ?>
@@ -636,7 +636,7 @@ function controleerOudBestand(knop) {
 
     const resultaat = document.getElementById('oud-bestand-resultaat');
     resultaat.style.display = 'block';
-    resultaat.style.background = '#eef1f4';
+    resultaat.style.background = 'var(--thema-badge-bg)';
     resultaat.style.color = 'var(--thema-tekst)';
     resultaat.textContent = '⏳ Bezig met controleren...';
 
@@ -654,29 +654,29 @@ function controleerOudBestand(knop) {
             knop.disabled = false;
 
             if (!data.succes) {
-                resultaat.style.background = '#f8d7da';
+                resultaat.style.background = 'var(--thema-genegeerd-bg)';
                 resultaat.style.color = 'var(--thema-rood)';
                 resultaat.textContent = '❌ ' + data.foutmelding;
                 return;
             }
 
             if (data.gevonden === true) {
-                resultaat.style.background = '#fff3cd';
+                resultaat.style.background = 'var(--thema-badge-bg)';
                 resultaat.style.color = 'var(--thema-geel)';
                 resultaat.textContent = '⚠️ ' + data.melding;
             } else if (data.gevonden === false) {
-                resultaat.style.background = '#d4edda';
+                resultaat.style.background = 'var(--thema-vertrouwd-bg)';
                 resultaat.style.color = 'var(--thema-groen)';
                 resultaat.textContent = '✅ ' + data.melding;
             } else {
-                resultaat.style.background = '#eef1f4';
+                resultaat.style.background = 'var(--thema-badge-bg)';
                 resultaat.style.color = 'var(--thema-tekst)';
                 resultaat.textContent = 'ℹ️ ' + data.melding;
             }
         })
         .catch(err => {
             knop.disabled = false;
-            resultaat.style.background = '#f8d7da';
+            resultaat.style.background = 'var(--thema-genegeerd-bg)';
             resultaat.style.color = 'var(--thema-rood)';
             resultaat.textContent = '❌ Er ging iets mis: ' + err.message;
         });
@@ -748,12 +748,12 @@ function verstuurFtp(knop) {
     const meldingBoven = document.getElementById('ftp-melding-boven');
     meldingBoven.className = 'melding';
     meldingBoven.style.display = 'block';
-    meldingBoven.textContent = '⏳ Bezig met versturen via FTP...';
+    meldingBoven.textContent = '⏳ Bezig met versturen via FTP/SFTP...';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     const resultaat = document.getElementById('ftp-resultaat');
     resultaat.style.display = 'block';
-    resultaat.textContent = '⏳ Bezig met versturen via FTP...';
+    resultaat.textContent = '⏳ Bezig met versturen via FTP/SFTP...';
 
     const body = new URLSearchParams();
     body.append('csrf_token', CSRF_TOKEN);
@@ -772,7 +772,7 @@ function verstuurFtp(knop) {
 
             if (tekst.includes('❌')) {
                 meldingBoven.className = 'melding fout';
-                meldingBoven.textContent = '❌ Het versturen via FTP is niet gelukt - zie de details hieronder.';
+                meldingBoven.textContent = '❌ Het versturen via FTP/SFTP is niet gelukt - zie de details hieronder.';
 
                 if (tekst.includes('mist het uitvoer-recht')) {
                     herstelKnop.style.display = 'inline-block';
@@ -781,7 +781,7 @@ function verstuurFtp(knop) {
                 }
             } else {
                 meldingBoven.className = 'melding ok';
-                meldingBoven.textContent = '✅ Het scanscript is met FTP op de website geplaatst.';
+                meldingBoven.textContent = '✅ Het scanscript is op de website geplaatst (via FTP/SFTP, zie de details hieronder).';
                 herstelKnop.style.display = 'none';
             }
 
@@ -804,7 +804,7 @@ function vervangScanscript(knop) {
 
     const resultaat = document.getElementById('vervang-resultaat');
     resultaat.style.display = 'block';
-    resultaat.style.background = '#eef1f4';
+    resultaat.style.background = 'var(--thema-badge-bg)';
     resultaat.style.color = 'var(--thema-tekst)';
     resultaat.textContent = '⏳ Nieuw scanscript wordt gegenereerd en geplaatst...';
 
@@ -822,19 +822,19 @@ function vervangScanscript(knop) {
             knop.disabled = false;
 
             if (data.succes) {
-                resultaat.style.background = '#d4edda';
+                resultaat.style.background = 'var(--thema-vertrouwd-bg)';
                 resultaat.style.color = 'var(--thema-groen)';
                 resultaat.textContent = '✅ ' + data.melding + ' - de pagina wordt ververst...';
                 setTimeout(() => location.reload(), 1500);
             } else {
-                resultaat.style.background = '#f8d7da';
+                resultaat.style.background = 'var(--thema-genegeerd-bg)';
                 resultaat.style.color = 'var(--thema-rood)';
                 resultaat.textContent = '❌ ' + data.melding;
             }
         })
         .catch(err => {
             knop.disabled = false;
-            resultaat.style.background = '#f8d7da';
+            resultaat.style.background = 'var(--thema-genegeerd-bg)';
             resultaat.style.color = 'var(--thema-rood)';
             resultaat.textContent = '❌ Er ging iets mis: ' + err.message;
         });
@@ -845,7 +845,7 @@ function herstelMapRechten(knop) {
 
     const resultaat = document.getElementById('herstel-rechten-resultaat');
     resultaat.style.display = 'block';
-    resultaat.style.background = '#eef1f4';
+    resultaat.style.background = 'var(--thema-badge-bg)';
     resultaat.style.color = 'var(--thema-tekst)';
     resultaat.textContent = '⏳ Bezig met aanpassen van de maprechten...';
 
@@ -863,19 +863,19 @@ function herstelMapRechten(knop) {
             knop.disabled = false;
 
             if (data.succes) {
-                resultaat.style.background = '#d4edda';
+                resultaat.style.background = 'var(--thema-vertrouwd-bg)';
                 resultaat.style.color = 'var(--thema-groen)';
                 resultaat.textContent = '✅ ' + data.melding;
                 knop.style.display = 'none';
             } else {
-                resultaat.style.background = '#f8d7da';
+                resultaat.style.background = 'var(--thema-genegeerd-bg)';
                 resultaat.style.color = 'var(--thema-rood)';
                 resultaat.textContent = '❌ ' + data.foutmelding;
             }
         })
         .catch(err => {
             knop.disabled = false;
-            resultaat.style.background = '#f8d7da';
+            resultaat.style.background = 'var(--thema-genegeerd-bg)';
             resultaat.style.color = 'var(--thema-rood)';
             resultaat.textContent = '❌ Er ging iets mis: ' + err.message;
         });

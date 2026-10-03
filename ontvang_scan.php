@@ -179,6 +179,78 @@ if (array_key_exists('super_users', $data) || array_key_exists('super_users_fout
 }
 
 // --------------------------------------------------------------------
+// Centraal opgehaalde update-feeds (sinds 1.29): voor update-feeds die de
+// site zelf niet kon of mocht ophalen (bijv. omdat de update-server
+// verzoeken van websites blokkeert), vult de monitor de nieuwste versie aan
+// uit de feed die één van de sites - of de monitor zelf - eerder ophaalde.
+// De feed-URL komt gewoon uit het scanresultaat: niets handmatigs in de
+// catalogus nodig, en niets naar Github. Zie feed_terugval_functies.php.
+//
+// Bewust HIER, vóór de transactie hieronder: zo wachten er geen
+// databasevergrendelingen op een netwerkverzoek, en verwerkt de rest van
+// dit script (opslaan, catalogus-opruiming) de aangevulde versies precies
+// alsof de site ze zelf had gevonden.
+// --------------------------------------------------------------------
+if ($siteId && isset($data['geinstalleerde_extensies']) && is_array($data['geinstalleerde_extensies'])) {
+    require_once 'feed_terugval_functies.php';
+    try {
+        // Sinds 1.29: update-servers die deze site blokkeerden (captcha,
+        // HTTP 403/429) worden voortaan centraal door de monitor opgehaald -
+        // het scanscript slaat ze bij volgende scans over.
+        if (!empty($data['feed_geblokkeerde_hosts']) && is_array($data['feed_geblokkeerde_hosts'])) {
+            foreach (array_slice($data['feed_geblokkeerde_hosts'], 0, 25) as $geblokkeerdeHost) {
+                registreerCentraleFeedHost($pdo, (string) $geblokkeerdeHost, $domeinVoorVergelijk);
+            }
+            echo "\nOK: update-server(s) die deze site blokkeren, worden voortaan centraal door de monitor opgehaald: " . implode(', ', array_map('strval', $data['feed_geblokkeerde_hosts'])) . '.';
+        }
+
+        // Sinds 1.29: was deze site aan de beurt om een centraal
+        // opgehaalde feed zelf op te halen (zie bepaalProefFeedsVoorSites()),
+        // dan stuurt hij de feed mee. Die geldt vanaf nu voor alle sites.
+        if (!empty($data['feed_proef_inhoud']) && is_array($data['feed_proef_inhoud'])) {
+            $overgenomenFeeds = verwerkProefFeedInhoud($pdo, $data['feed_proef_inhoud'], $domeinVoorVergelijk, (int) $siteId);
+            if (!empty($overgenomenFeeds)) {
+                echo "\nOK: " . count($overgenomenFeeds) . " update-feed(s) namens de monitor opgehaald door deze site - geldt nu voor alle sites: " . implode(', ', $overgenomenFeeds) . '.';
+            }
+        }
+        // Proeven van deze site die niets opleverden, als zodanig vastleggen -
+        // met het IP-adres waarmee de site zich nu meldt, zodat de volgende
+        // poging bij voorkeur via een site op een andere server loopt.
+        $siteIp = $_SERVER['REMOTE_ADDR'] ?? null;
+        registreerSiteIp($pdo, (int) $siteId, $siteIp);
+        registreerMislukteProef($pdo, (int) $siteId, $domeinVoorVergelijk, filter_var((string) $siteIp, FILTER_VALIDATE_IP) ? $siteIp : null);
+
+        $terugvalVerslag = vulNieuwsteVersiesAanViaMonitor($pdo, $data['geinstalleerde_extensies']);
+
+        if (!empty($terugvalVerslag['gelukt'])) {
+            $delen = [];
+            foreach ($terugvalVerslag['gelukt'] as $item) {
+                $toelichting = $item['vers']
+                    ? 'zojuist opgehaald'
+                    : 'opgehaald op ' . date('d-m-Y H:i', strtotime((string) $item['laatst_gelukt_op']));
+                if (!empty($item['handmatig'])) {
+                    $toelichting = 'handmatig ingevuld op ' . date('d-m-Y H:i', strtotime((string) $item['laatst_gelukt_op']));
+                } elseif ($item['fout'] !== null && !$item['vers']) {
+                    $toelichting = 'laatst bekende versie, ' . $toelichting . ' - laatste poging: ' . $item['fout'];
+                }
+                $delen[] = "{$item['naam']} => {$item['versie']} ({$toelichting})";
+            }
+            echo "\nOK: " . count($terugvalVerslag['gelukt']) . " nieuwste versie(s) via de monitor bepaald: " . implode(', ', $delen) . '.';
+        }
+        if (!empty($terugvalVerslag['mislukt'])) {
+            $delen = [];
+            foreach ($terugvalVerslag['mislukt'] as $item) {
+                $delen[] = "{$item['naam']} ({$item['reden']})";
+            }
+            echo "\nLet op: ook via de monitor (nog) geen nieuwste versie bekend voor: " . implode('; ', $delen) . '.';
+        }
+    } catch (\Throwable $e) {
+        // Nooit de verwerking van de scan zelf laten mislukken door de terugval.
+        echo "\nWaarschuwing: terugval via de monitor kon niet worden uitgevoerd - " . $e->getMessage();
+    }
+}
+
+// --------------------------------------------------------------------
 // Geïnstalleerde extensies opslaan (v11: volledige, automatisch
 // gedetecteerde lijst rechtstreeks uit de database van de site zelf).
 // --------------------------------------------------------------------

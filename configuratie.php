@@ -780,7 +780,7 @@ header .knop {
 
 
         <label for="monitor_basis_url">Pad naar de monitorsite</label>
-        <div class="uitleg">De basis-URL van deze monitor, zonder afsluitende slash, bijv. <code>https://voorbeeld.nl/mapnaam</code>.</div>
+        <div class="uitleg">De basis-URL van deze monitor, zonder afsluitende slash: het volledige adres, beginnend met https://, tot en met de map waarin de monitor staat.</div>
         <input type="text" id="monitor_basis_url" name="monitor_basis_url" required value="<?php echo htmlspecialchars($instellingen['monitor_basis_url'] ?? ''); ?>">
 
         <label for="login_gebruikersnaam">Inlognaam monitor</label>

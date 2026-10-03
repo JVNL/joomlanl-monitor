@@ -4008,42 +4008,176 @@ function checkRootLevel($pad, &$rootUnknown, $vertrouwdeMappen, $ignoreerBestand
 // aparte instellingen nodig - dit werkt met de gegevens die de site toch al
 // zelf heeft.
 
-// Hulpfunctie: haal een URL op (voor het ophalen van een update-feed).
-function haalUrlEenvoudig($url, $timeoutSeconden = 8)
+// Update-servers die de monitor CENTRAAL ophaalt (sinds 1.29). Sommige
+// update-servers blokkeren verzoeken van websites - bijv. de botbeveiliging
+// van SiteGround bij Balbooa, die al aanslaat als tientallen sites in een
+// "alles scannen"-ronde vlak na elkaar dezelfde feed opvragen. De monitor
+// onthoudt zelf welke servers dat zijn en geeft ze bij het starten van een
+// scan mee (?cf=host1,host2). Feeds van die servers vraagt dit script dan
+// NIET zelf op: het meldt alleen de feed-URL, en de monitor haalt die feed
+// hooguit eens per 12 uur op, voor alle sites tegelijk.
+// Zonder parameter (bijv. het scanscript los openen) werkt alles zoals
+// voorheen.
+function haalCentraleFeedHosts(): array
 {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
+    static $hosts = null;
+    if ($hosts !== null) {
+        return $hosts;
+    }
+    $hosts = [];
+    foreach (explode(',', (string) ($_GET['cf'] ?? '')) as $host) {
+        $host = strtolower(trim($host));
+        $host = preg_replace('/^www\./', '', $host);
+        if ($host !== '' && preg_match('/^[a-z0-9.-]{1,253}$/', $host) && count($hosts) < 25) {
+            $hosts[$host] = true;
+        }
+    }
+    return $hosts;
+}
+
+// Sinds 1.29: per feed wijst de monitor hooguit eens per 12 uur ÉÉN site
+// aan die de feed van zo'n centrale update-server toch zelf mag ophalen
+// (?cfp=code1,code2 - de code is de eerste 12 tekens van de sha256 van de
+// feed-URL). Die site stuurt de opgehaalde feed mee naar de monitor, die hem
+// daarna voor alle sites gebruikt. Zo krijgt de update-server één gewoon
+// verzoek van één Joomla-site, in plaats van tientallen vlak na elkaar.
+function isProefFeed(string $url): bool
+{
+    static $codes = null;
+    if ($codes === null) {
+        $codes = [];
+        foreach (explode(',', (string) ($_GET['cfp'] ?? '')) as $code) {
+            $code = strtolower(trim($code));
+            if (preg_match('/^[a-f0-9]{12}$/', $code) && count($codes) < 25) {
+                $codes[$code] = true;
+            }
+        }
+    }
+    return !empty($codes) && isset($codes[substr(hash('sha256', trim($url)), 0, 12)]);
+}
+
+function isCentraalOpgehaaldeFeed(string $url): bool
+{
+    $hosts = haalCentraleFeedHosts();
+    if (empty($hosts)) {
+        return false;
+    }
+    if (isProefFeed($url)) {
+        return false; // deze site is nu aan de beurt om deze feed zelf op te halen
+    }
+    $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+    $host = preg_replace('/^www\./', '', $host);
+    if ($host === '') {
+        return false;
+    }
+    foreach ($hosts as $centraal => $_) {
+        if ($host === $centraal || substr($host, -strlen('.' . $centraal)) === '.' . $centraal) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// cURL-instellingen voor het ophalen van een update-feed, in twee stijlen:
+//
+//  - 'joomla' (sinds 1.29 de EERSTE keus): precies zoals Joomla's eigen
+//    updatecontrole (Extensies > Updaten) een feed opvraagt - met Joomla's
+//    eigen User-Agent ("Mozilla/5.0 Joomla!/<versie> Joomla") en verder
+//    geen bijzondere headers. Dit script draait op een Joomla-site en
+//    vraagt de update-feed van een op die site geïnstalleerde extensie op:
+//    dat is letterlijk waar zo'n feed voor bedoeld is, en zo meldt het
+//    verzoek zich nu ook.
+//
+//    Aanleiding: de botbeveiliging van SiteGround (bij Balbooa) weigerde de
+//    verzoeken van dit script, terwijl Joomla's eigen updatecontrole op
+//    DEZELFDE site en server dezelfde feed gewoon kon openen. Het enige
+//    verschil was de afzender: dit script deed zich voor als een
+//    Chrome-browser (inclusief Sec-Ch-Ua-/Sec-Fetch-headers) - en een
+//    "browser" die zich vervolgens niet als browser gedraagt, is precies wat
+//    zo'n beveiliging als bot aanmerkt.
+//
+//  - 'browser' (de oude aanpak, nu alleen nog als tweede poging bij een
+//    gewone fout): browserachtige headers, voor de enkele server die een
+//    onbekende User-Agent weigert. NIET gebruikt na een blokkade (captcha,
+//    HTTP 403/429): daar helpt opnieuw aankloppen niet.
+function feedCurlOpties($timeoutSeconden, $stijl)
+{
+    $opties = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT        => $timeoutSeconden,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         CURLOPT_ENCODING       => '', // laat curl gzip/deflate/br automatisch decomprimeren
-        // CURL_HTTP_VERSION_2TLS bestaat pas vanaf libcurl 7.47 (PHP 7.0.7). Op oudere
-        // servers (bv. CentOS 7) is de constante niet gedefinieerd en gaf elke aanroep hier een
-        // "Use of undefined constant"-waarschuwing (in PHP 8 een fatale fout) - dan gewoon de
-        // standaardinstelling van curl gebruiken.
-        CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_NONE, // moderne browsers gebruiken vrijwel altijd HTTP/2
-        CURLOPT_COOKIEJAR      => '',
-        CURLOPT_COOKIEFILE     => '',
-        CURLOPT_HTTPHEADER     => [
-            'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language: nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Sec-Fetch-Dest: document',
-            'Sec-Fetch-Mode: navigate',
-            'Sec-Fetch-Site: none',
-            'Sec-Fetch-User: ?1',
-            'Upgrade-Insecure-Requests: 1',
-            'Sec-Ch-Ua: "Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-            'Sec-Ch-Ua-Mobile: ?0',
-            'Sec-Ch-Ua-Platform: "Windows"',
-        ],
-    ]);
+    ];
 
-    $inhoud   = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    if ($stijl === 'joomla') {
+        $joomlaVersie = (string) ($GLOBALS['feedJoomlaVersie'] ?? '');
+        if (!preg_match('/^[0-9]+(\.[0-9]+){1,3}$/', $joomlaVersie)) {
+            $joomlaVersie = '5.0.0';
+        }
+        $opties[CURLOPT_USERAGENT] = 'Mozilla/5.0 Joomla!/' . $joomlaVersie . ' Joomla';
+        return $opties;
+    }
+
+    $opties[CURLOPT_USERAGENT] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    // CURL_HTTP_VERSION_2TLS bestaat pas vanaf libcurl 7.47 (PHP 7.0.7). Op oudere
+    // servers (bv. CentOS 7) is de constante niet gedefinieerd en gaf elke aanroep hier een
+    // "Use of undefined constant"-waarschuwing (in PHP 8 een fatale fout) - dan gewoon de
+    // standaardinstelling van curl gebruiken.
+    $opties[CURLOPT_HTTP_VERSION] = defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_NONE; // moderne browsers gebruiken vrijwel altijd HTTP/2
+    $opties[CURLOPT_COOKIEJAR]  = '';
+    $opties[CURLOPT_COOKIEFILE] = '';
+    $opties[CURLOPT_HTTPHEADER] = [
+        'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language: nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Sec-Fetch-Dest: document',
+        'Sec-Fetch-Mode: navigate',
+        'Sec-Fetch-Site: none',
+        'Sec-Fetch-User: ?1',
+        'Upgrade-Insecure-Requests: 1',
+        'Sec-Ch-Ua: "Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'Sec-Ch-Ua-Mobile: ?0',
+        'Sec-Ch-Ua-Platform: "Windows"',
+    ];
+
+    return $opties;
+}
+
+// Is dit antwoord een blokkade door de update-server (captchapagina van een
+// botbeveiliging, of HTTP 403/429)? Dan geen tweede poging in een andere stijl.
+function isFeedBlokkade($inhoud, $httpCode)
+{
+    if (in_array((int) $httpCode, [403, 429], true)) {
+        return true;
+    }
+    return is_string($inhoud) && stripos(substr($inhoud, 0, 4000), '/.well-known/sgcaptcha') !== false;
+}
+
+// Hulpfunctie: haal een URL op (voor het ophalen van een update-feed).
+function haalUrlEenvoudig($url, $timeoutSeconden = 8)
+{
+    $inhoud = false;
+    $httpCode = 0;
+
+    foreach (['joomla', 'browser'] as $stijl) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, feedCurlOpties($timeoutSeconden, $stijl));
+
+        $inhoud   = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        // Gelukt, of juist geblokkeerd: geen tweede poging.
+        $gelukt = $inhoud !== false && $inhoud !== '' && $httpCode >= 200 && $httpCode < 300;
+        if ($gelukt || isFeedBlokkade($inhoud, $httpCode)) {
+            break;
+        }
+    }
+
+    // Bewaard voor de herkenning van een blokkade door de update-server
+    // (HTTP 403/429), zie de MISLUKT-afhandeling in de extensielus.
+    $GLOBALS['laatsteFeedHttpCode'] = (int) $httpCode;
 
     // Sommige servers (bijv. Balbooa's update-feeds) geven om onduidelijke
     // redenen een andere 2xx-status terug dan 200 (bijv. 202 Accepted),
@@ -4087,30 +4221,8 @@ function haalUrlsParallelEenvoudig(array $urls, int $timeoutSeconden = 10): arra
 
     foreach ($urls as $url) {
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT        => $timeoutSeconden,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            CURLOPT_ENCODING       => '',
-            CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_NONE, // zie de toelichting bij haalUrlEenvoudig()
-            CURLOPT_COOKIEJAR      => '',
-            CURLOPT_COOKIEFILE     => '',
-            CURLOPT_HTTPHEADER     => [
-                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language: nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Sec-Fetch-Dest: document',
-                'Sec-Fetch-Mode: navigate',
-                'Sec-Fetch-Site: none',
-                'Sec-Fetch-User: ?1',
-                'Upgrade-Insecure-Requests: 1',
-                'Sec-Ch-Ua: "Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-                'Sec-Ch-Ua-Mobile: ?0',
-                'Sec-Ch-Ua-Platform: "Windows"',
-            ],
-        ]);
+        // Zelfde afzender als Joomla's eigen updatecontrole - zie feedCurlOpties().
+        curl_setopt_array($ch, feedCurlOpties($timeoutSeconden, 'joomla'));
         curl_multi_add_handle($multiHandle, $ch);
         $handles[$url] = $ch;
     }
@@ -4181,6 +4293,12 @@ function haalHoogsteStabieleVersieUitXml($xmlInhoud, $huidigeVersie = null, $max
             }
         }
     }
+
+    // De XML-declaratie zelf (de kopregel met xml version="1.0") bevat ook een
+    // version-attribuut - zonder dit weg te halen telde "1.0" mee als
+    // kandidaat, en won die bij een geïnstalleerde 1.x-versie zelfs via de
+    // voorkeur voor dezelfde hoofdversie hieronder (sinds 1.29).
+    $xmlInhoud = preg_replace('/<\?xml\b[^>]*\?>/i', '', $xmlInhoud);
 
     $versies = [];
 
@@ -4540,6 +4658,9 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
         'aantal_met_feed_url'    => 0,
         'aantal_feed_opgehaald'  => 0,
         'aantal_feed_mislukt'    => 0,
+        'aantal_feed_centraal'   => 0,
+        'geblokkeerde_hosts'     => [],
+        'proef_feeds'            => [],
         'aantal_pakket_onderdeel' => 0,
         'feed_details'           => [],
     ];
@@ -4549,6 +4670,8 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
     $totaalGehashteBestanden = 0;
     $maxTotaalBestanden = 6000; // veiligheidsklep: houdt de scan/payload behapbaar op sites met heel veel extensies
     $joomlaKernVersie = bepaalJoomlaKernVersieVoorHashing($startMap);
+    // Voor de User-Agent van de feed-verzoeken (zie feedCurlOpties()).
+    $GLOBALS['feedJoomlaVersie'] = (string) $joomlaKernVersie;
 
     // Rauwe Joomla-kernmappen die niet als extensie in #__extensions
     // geregistreerd staan (dus niet via bepaalExtensieMappen() gevonden
@@ -4702,7 +4825,20 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
         if (!$isKern && !$isRsJoomlaPakketOnderdeel) {
             $diagnose['aantal_derden']++;
 
-            if ($updateFeedUrl && !$tijdslimietBereikt && (time() - $scriptStartTijd) > $maxSecondenTotaalBijScriptstart) {
+            // Feed van een update-server die de monitor centraal ophaalt
+            // (zie haalCentraleFeedHosts()): hier niet zelf opvragen. De
+            // feed-URL gaat wél gewoon mee naar de monitor ('update_feed_url'
+            // hieronder blijft ongemoeid). Taalbestanden nooit: die hebben
+            // de kernversie van déze site als grens nodig.
+            $ophaalUrl = $updateFeedUrl;
+            if ($updateFeedUrl && !$isTaalbestand && isCentraalOpgehaaldeFeed($updateFeedUrl)) {
+                $ophaalUrl = null;
+                $diagnose['aantal_met_feed_url']++;
+                $diagnose['aantal_feed_centraal']++;
+                $diagnose['feed_details'][] = "CENTRAAL: {$rij['name']} - niet vanaf deze site opgevraagd, de monitor haalt deze feed zelf op (de update-server blokkeert verzoeken van websites) (feed: $updateFeedUrl)";
+            }
+
+            if ($ophaalUrl && !$tijdslimietBereikt && (time() - $scriptStartTijd) > $maxSecondenTotaalBijScriptstart) {
                 // Tijdslimiet voor de SEQUENTIËLE ronde bereikt: geen nieuwe
                 // feeds meer één-voor-één ophalen. In plaats van deze en
                 // alle volgende extensies definitief op "onbekend" te laten
@@ -4714,7 +4850,7 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
                 $tijdslimietBereikt = true;
             }
 
-            if ($updateFeedUrl && !$tijdslimietBereikt) {
+            if ($ophaalUrl && !$tijdslimietBereikt) {
                 $diagnose['aantal_met_feed_url']++;
 
                 $feedInhoud = haalUrlEenvoudig($updateFeedUrl);
@@ -4722,23 +4858,55 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
                     $nieuwsteVersie = haalHoogsteStabieleVersieUitXml($feedInhoud, $versie, $maxKernversieVoorDitItem, $rij['element'] ?? null);
                 }
 
+                // Proefsite voor deze feed (zie isProefFeed()): de opgehaalde
+                // feed meesturen naar de monitor, zodat alle andere sites met
+                // dezelfde feed hem niet zelf hoeven op te vragen.
+                $isProef = !$isTaalbestand && isProefFeed($updateFeedUrl);
+                if ($isProef && $nieuwsteVersie !== null && strlen($feedInhoud) <= 512 * 1024) {
+                    $diagnose['proef_feeds'][$updateFeedUrl] = $feedInhoud;
+                }
+
                 if ($nieuwsteVersie !== null) {
                     $diagnose['aantal_feed_opgehaald']++;
                     $grensToelichting = $isTaalbestand
                         ? (' [taalbestand, kernversiegrens (van deze site): ' . ($maxKernversieVoorDitItem ?? 'ONBEKEND - geen grens toegepast') . ']')
                         : '';
-                    $diagnose['feed_details'][] = "OK: {$rij['name']} => $nieuwsteVersie (feed: $updateFeedUrl)" . $grensToelichting;
+                    $diagnose['feed_details'][] = ($isProef ? 'OK (namens de monitor opgehaald, geldt voor alle sites)' : 'OK') . ": {$rij['name']} => $nieuwsteVersie (feed: $updateFeedUrl)" . $grensToelichting;
                 } else {
                     $diagnose['aantal_feed_mislukt']++;
+                    // Taalbestanden doen niet mee aan de terugval via de
+                    // monitor (versie gebonden aan de kernversie van deze site).
+                    $terugvalTekst = $isTaalbestand ? '' : ' - de monitor probeert deze feed zelf op te halen';
+                    $httpCodeFeed = (int) ($GLOBALS['laatsteFeedHttpCode'] ?? 0);
+                    $isCaptcha = $feedInhoud !== null && stripos(substr($feedInhoud, 0, 4000), '/.well-known/sgcaptcha') !== false;
+                    // Blokkeert de update-server deze site (captcha, of HTTP
+                    // 403/429)? Dan de server doorgeven aan de monitor: die
+                    // haalt feeds van deze server voortaan centraal op, en
+                    // geeft hem bij volgende scans mee als "niet zelf
+                    // opvragen" (zie haalCentraleFeedHosts()).
+                    if (!$isTaalbestand && ($isCaptcha || ($feedInhoud === null && in_array($httpCodeFeed, [403, 429], true)))) {
+                        $geblokkeerdeHost = preg_replace('/^www\./', '', strtolower((string) parse_url($updateFeedUrl, PHP_URL_HOST)));
+                        if ($geblokkeerdeHost !== '') {
+                            $diagnose['geblokkeerde_hosts'][$geblokkeerdeHost] = true;
+                        }
+                    }
                     if ($feedInhoud === null) {
-                        $reden = 'kon niet opgehaald worden (netwerk-/HTTP-fout)';
+                        $reden = 'kon niet opgehaald worden (' . ($httpCodeFeed > 0 ? "HTTP $httpCodeFeed" : 'netwerkfout') . ')' . $terugvalTekst;
+                    } elseif ($isCaptcha) {
+                        // De update-server stuurt een captchapagina van
+                        // SiteGround's botbeveiliging in plaats van de feed:
+                        // het IP-adres van deze server wordt daar (tijdelijk)
+                        // geblokkeerd. De monitor probeert deze feed daarom
+                        // zelf nog een keer, vanaf zijn eigen server (zie
+                        // feed_terugval_functies.php op de monitor).
+                        $reden = 'geblokkeerd door de botbeveiliging van de update-server (captchapagina in plaats van de feed)' . $terugvalTekst;
                     } else {
                         $fragment = substr(preg_replace('/\s+/', ' ', trim($feedInhoud)), 0, 300);
-                        $reden = "opgehaald, maar geen versienummer gevonden - eerste 300 tekens: \"$fragment\"";
+                        $reden = "opgehaald, maar geen versienummer gevonden - eerste 300 tekens: \"$fragment\"" . $terugvalTekst;
                     }
-                    $diagnose['feed_details'][] = "MISLUKT: {$rij['name']} - $reden (feed: $updateFeedUrl)";
+                    $diagnose['feed_details'][] = ($isProef ? 'MISLUKT (namens de monitor geprobeerd)' : 'MISLUKT') . ": {$rij['name']} - $reden (feed: $updateFeedUrl)";
                 }
-            } elseif ($updateFeedUrl && $tijdslimietBereikt) {
+            } elseif ($ophaalUrl && $tijdslimietBereikt) {
                 $diagnose['aantal_met_feed_url']++;
 
                 // In de wachtrij voor de opruimronde. 'index' is de positie
@@ -5430,6 +5598,9 @@ if (isset($extensieResultaat['fout'])) {
         echo "Extensies van derden MET een geregistreerde update-locatie: " . ($d['aantal_met_feed_url'] ?? '?') . "\n";
         echo "  - waarvan nieuwste versie succesvol opgehaald: " . ($d['aantal_feed_opgehaald'] ?? '?') . "\n";
         echo "  - waarvan het ophalen mislukte: " . ($d['aantal_feed_mislukt'] ?? '?') . "\n";
+        if (!empty($d['aantal_feed_centraal'])) {
+            echo "  - waarvan centraal door de monitor opgehaald: " . $d['aantal_feed_centraal'] . "\n";
+        }
         if (!empty($d['feed_details'])) {
             echo "  Details per extensie:\n";
             foreach ($d['feed_details'] as $detailRegel) {
@@ -5457,6 +5628,8 @@ $payload = [
     'super_users_fout' => $superUsersResultaat['fout'] ?? null,
     'extensies_fout' => $extensieResultaat['fout'] ?? null,
     'extensie_bestand_hashes' => $extensieResultaat['bestand_hashes'] ?? null,
+    'feed_geblokkeerde_hosts' => array_keys($extensieResultaat['diagnose']['geblokkeerde_hosts'] ?? []),
+    'feed_proef_inhoud' => $extensieResultaat['diagnose']['proef_feeds'] ?? [],
     'extra_scan_pad_info' => !$extraScanIngeschakeld
         ? null
         : ($extraScanRootAbsoluut !== null

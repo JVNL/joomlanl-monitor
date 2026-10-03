@@ -293,11 +293,11 @@ th {
         door een tijdelijk verbindingsprobleem niet lukte.
     </div>
 
-    <h3>Blok "🛡️ Admin Tools: informatie voor .htaccess-maker"</h3>
-    <p>Herkent automatisch, op basis van de laatst gescande extensielijst, welke sites Akeeba Admin Tools gebruiken - daar hoef je zelf niets voor aan te vinken. Klik op de knop voor een overzicht (favicon, aanklikbare domeinnaam naar de admin-backend, en de exacte scanscript-bestandsnaam) van al die sites naast elkaar, zodat je niet per site apart hoeft op te zoeken welke naam je in de .htaccess-maker moet invullen (zie hoofdstuk 3 voor het volledige stappenplan).</p>
+    <h3>Blok met de 🛡️-knop: informatie voor de .htaccess-maker van een firewall-extensie</h3>
+    <p>Herkent automatisch, op basis van de laatst gescande extensielijst, welke sites een firewall-extensie met een eigen .htaccess-maker gebruiken - daar hoef je zelf niets voor aan te vinken. Klik op de knop voor een overzicht (favicon, aanklikbare domeinnaam naar de admin-backend, en de exacte scanscript-bestandsnaam) van al die sites naast elkaar, zodat je niet per site apart hoeft op te zoeken welke naam je in de .htaccess-maker moet invullen (zie hoofdstuk 3 voor het volledige stappenplan).</p>
     <div class="tip">
-        💡 Dit overzicht toont alleen sites waarbij Admin Tools ooit is aangetroffen bij een scan - is een site nog
-        nooit (succesvol) gescand, dan staat 'ie hier ook nog niet tussen, ook al gebruikt die Admin Tools wel
+        💡 Dit overzicht toont alleen sites waarbij die firewall-extensie ooit is aangetroffen bij een scan - is een site nog
+        nooit (succesvol) gescand, dan staat 'ie hier ook nog niet tussen, ook al gebruikt die zo'n firewall-extensie wel
         degelijk.
     </div>
 </section>
@@ -322,17 +322,17 @@ th {
     </div>
 
     <div class="tip">
-        💡 Gebruikt de site Akeeba Admin Tools? Dan blokkeert de firewall dit scanscript en de reguliere website-check
-        vaak standaard. Op de pagina "Site toevoegen" (tabblad naast Algemeen) staat, achter de knop "Pas dit eerst
-        aan als je Akeeba Admin Tools gebruikt", een volledig stappenplan om het IP-adres van de monitor uit te
-        zonderen en het scanscript toegankelijk te maken via de .htaccess-maker van Admin Tools. Volg dat stappenplan
-        per site.
+        💡 Gebruikt de site een firewall-extensie? Dan blokkeert die firewall dit scanscript en de reguliere
+        website-check vaak standaard. Op de pagina "Site toevoegen" (tabblad naast Algemeen) staat, achter de knop
+        met de tekst "Pas dit eerst aan als je ... gebruikt", een volledig stappenplan om het IP-adres van de monitor
+        uit te zonderen en het scanscript toegankelijk te maken via de .htaccess-maker van die extensie. Volg dat
+        stappenplan per site.
     </div>
     <div class="waarschuwing">
-        ⚠️ De uitzondering in Admin Tools staat op de <strong>exacte bestandsnaam</strong> van het scanscript, en
-        elke site heeft daar sinds kort een eigen, uniek gegenereerde naam voor (zie hoofdstuk 9). Wijzig je die naam
+        ⚠️ De uitzondering in de firewall staat op de <strong>exacte bestandsnaam</strong> van het scanscript, en
+        elke site heeft daar een eigen, uniek gegenereerde naam voor (zie hoofdstuk 9). Wijzig je die naam
         ooit (via "Vervang door nieuwe naam" bij Site-instellingen, of de migratieknop op de configuratiepagina),
-        dan moet je de uitzondering in Admin Tools <strong>opnieuw</strong> instellen met de nieuwe naam - anders
+        dan moet je de uitzondering in de firewall <strong>opnieuw</strong> instellen met de nieuwe naam - anders
         blokkeert de firewall het scanscript alsnog, ook al staat het gewoon correct op de site.
     </div>
 </section>
@@ -342,15 +342,14 @@ th {
     <p>Ga naar ⚙️ Configuratie → tabblad "Site toevoegen". Daar vul je twee velden in:</p>
 
     <h3>Domein</h3>
-    <p>De domeinnaam zonder <code>https://</code> of <code>www.</code>, bijv. <code>voorbeeld.nl</code>. Plak je dat er per ongeluk toch bij, dan wordt het automatisch verwijderd.</p>
+    <p>De domeinnaam zonder <code>https://</code> of <code>www.</code> ervoor. Plak je dat er per ongeluk toch bij, dan wordt het automatisch verwijderd.</p>
     <div class="tip">
         💡 <strong>Staat er meerdere, losse Joomla-installaties op hetzelfde hostingaccount</strong> (bijv. verschillende
-        stamboom- of familiesites in eigen submappen)? Vul dan de submap achter het domein in, bijv.
-        <code>voorbeeld.nl/submap</code>. Dit is puur een <strong>herkenbaar label</strong> in je eigen sitelijst en
+        stamboom- of familiesites in eigen submappen)? Vul dan de submap achter het domein in, gescheiden door een schuine streep. Dit is puur een <strong>herkenbaar label</strong> in je eigen sitelijst en
         helpt de "Zoek automatisch"-knop bij het FTP-pad de juiste map te vinden tussen meerdere kandidaten - het
         heeft <strong>geen</strong> invloed op de URL waarmee de monitor de site zelf benadert. Is de site ook
-        daadwerkelijk via die submap-URL bereikbaar (bijv. <code>https://voorbeeld.nl/submap/</code> in plaats van
-        <code>https://voorbeeld.nl/</code>)? Vul dan bij Site-instellingen ook nog het aparte veld "URL-submap" in
+        daadwerkelijk via die submap-URL bereikbaar (dus met de submap achter de domeinnaam, in plaats van
+        alleen de domeinnaam)? Vul dan bij Site-instellingen ook nog het aparte veld "URL-submap" in
         (zie hoofdstuk 4) - anders krijg je een "pagina niet gevonden" zodra de monitor probeert te scannen.
     </div>
 
@@ -378,7 +377,7 @@ th {
     </div>
 
     <h3>URL-submap</h3>
-    <p>Bij verreweg de meeste sites staat Joomla gewoon los op het domein (<code>https://voorbeeld.nl/</code>), en laat je dit veld leeg. Sommige sites staan echter in een submap die WEL rechtstreeks via de domeinnaam bereikbaar is, bijvoorbeeld <code>https://voorbeeld.nl/bieb/</code> in plaats van <code>https://voorbeeld.nl/</code>. Vul in dat geval hier die submap in (bijv. <code>bieb</code>).</p>
+    <p>Bij verreweg de meeste sites staat Joomla gewoon los op het domein, en laat je dit veld leeg. Sommige sites staan echter in een submap die WEL rechtstreeks via de domeinnaam bereikbaar is: het adres van de site is dan de domeinnaam met die submap erachter. Vul in dat geval hier alleen de naam van die submap in.</p>
     <div class="waarschuwing">
         ⚠️ <strong>Dit is iets anders dan het FTP-pad</strong> bij de FTP-gegevens hieronder. Het FTP-pad bepaalt
         alleen in welke map het scanscript op de schijf van de server terechtkomt (voor het uploaden); de URL-submap
@@ -446,7 +445,7 @@ th {
     <h3>Extra scanpad</h3>
     <p>Het extra scanpad kijkt automatisch mee tot aan de accountroot van het hostingpakket - kwaadaardige bestanden worden namelijk niet alleen naast <code>public_html</code> aangetroffen, maar soms ook nog hoger. Dit staat altijd aan en hoeft niet apart ingesteld te worden: het scanscript bepaalt zelf, bij elke scan opnieuw, op basis van het <strong>eigenaarschap</strong> van elke map hoe ver dat is - zolang een map nog dezelfde eigenaar heeft als de website zelf, hoort die nog bij hetzelfde hostingaccount en wordt er nog een niveau hoger gekeken; zodra de eigenaar verandert (bijv. bij de gedeelde hoofdmap van de hele server, meestal van root), stopt het daar vanzelf. Dat werkt bij elke hostingpartij, zonder dat er per host verschillende mapnamen herkend hoeven te worden.</p>
     <p>Na de eerstvolgende scan zie je bij Site-instellingen precies staan wat er gevonden is, bijv. <code>📍 Bij de laatste scan gedetecteerd: 3 niveau(s) boven de website-root: /home/gebruikersnaam</code>.</p>
-    <p>Herkenbare hostingpartij-systeemmappen/-bestanden (bijv. <code>Maildir</code>, <code>.shadow</code>, <code>.pki</code>, <code>.softaculous</code>, <code>.spamassassin</code>, <code>.trash</code>, <code>.well-known</code>, <code>akeeba-backup</code>) en <code>domains</code>/<code>public_html</code> zelf worden automatisch overgeslagen, zonder dat je daar iets voor hoeft in te stellen - dat voorkomt dat de accountroot in één klap honderden systeeminterne bestandjes als "verdacht" laat zien. Vul daaronder eventueel bij <strong>"Nog extra (sub)mapnamen overslaan"</strong> alleen nog mappen in die specifiek bij déze site ook overgeslagen moeten worden (bijv. een eigen, losse back-upmap).</p>
+    <p>Herkenbare hostingpartij-systeemmappen/-bestanden (bijv. <code>Maildir</code>, <code>.shadow</code>, <code>.pki</code>, <code>.softaculous</code>, <code>.spamassassin</code>, <code>.trash</code>, <code>.well-known</code>) en <code>domains</code>/<code>public_html</code> zelf worden automatisch overgeslagen, zonder dat je daar iets voor hoeft in te stellen - dat voorkomt dat de accountroot in één klap honderden systeeminterne bestandjes als "verdacht" laat zien. Vul daaronder eventueel bij <strong>"Nog extra (sub)mapnamen overslaan"</strong> alleen nog mappen in die specifiek bij déze site ook overgeslagen moeten worden (bijv. een eigen, losse back-upmap).</p>
     <div class="tip">
         💡 <strong>Bewust wél meegescand:</strong> <code>.cagefs</code> en <code>.cl.selector</code> (CloudLinux-
         systeemmappen) staan expres niet op de standaard-uitsluitlijst. Die zijn vaak wereld-schrijfbaar en worden
@@ -462,7 +461,7 @@ th {
         eigen mappenboom. De scanuitvoer meldt dat dan gewoon netjes ("niet bereikbaar"/"niet leesbaar"), zonder te crashen.
     </div>
     <div class="tip">
-        💡 Sommige hostingpartijen (bijv. Vimexx) plaatsen naast <code>public_html</code> nog een map als
+        💡 Sommige hostingpartijen plaatsen naast <code>public_html</code> nog een map als
         <code>private_html</code>, die in werkelijkheid een symlink is naar <em>dezelfde</em> bestanden als de
         website-root zelf (geen kopie). De scan herkent dit automatisch (via het daadwerkelijke, fysieke pad, niet
         de mapnaam) en slaat zo'n map over - anders zou elke vondst dubbel worden gemeld, één keer per pad
@@ -476,7 +475,7 @@ th {
     <p>Bij een vondst binnen dit extra scanpad werken de knoppen <strong>"👁️ Bekijk"</strong> en <strong>"🔧 Rechten herstellen"</strong> gewoon, zodat je de inhoud kunt inzien en afwijkende rechten met één klik kunt herstellen. De knoppen <strong>"Quarantaine"</strong>, <strong>"Blokkeer"</strong> en <strong>"Verwijder"</strong> blijven daar bewust buiten bereik (foutmelding: "Dit kan om veiligheidsredenen niet, gebruik daarvoor handmatig FTP") - wijzigen/verwijderen buiten de website-root zou een aanvaller anders de mogelijkheid kunnen geven om via een handig geconstrueerd pad ergens anders op de server bestanden aan te raken.</p>
 
     <h3>Scanscript-bestandsnaam</h3>
-    <p>Elke site krijgt bij het toevoegen automatisch een <strong>unieke, gegenereerde bestandsnaam</strong> op basis van de naam van deze monitor (bijv. <code>scan-door-compactwebmonitor-a3f9c2.php</code>), in plaats van voor elke site dezelfde vaste naam <code>scan-en-check-website.php</code> te gebruiken. Dat is veiliger (een voorspelbare naam die op elke site identiek is, is voor een geautomatiseerde aanvaller makkelijker te vinden) én zorgt ervoor dat de monitor zo'n bestand altijd herkent als van zichzelf, mocht het ergens los worden teruggevonden. De naam is bewust gekoppeld aan de monitor zelf, niet aan de domeinnaam van de site - welke site het is, is namelijk toch al overduidelijk uit de context; welke monitor het bestand daar heeft neergezet juist niet, bijvoorbeeld als een site door meerdere, losse monitor-installaties wordt gevolgd.</p>
+    <p>Elke site krijgt bij het toevoegen automatisch een <strong>unieke, gegenereerde bestandsnaam</strong> op basis van de naam van deze monitor (de naam van de monitor, met een willekeurige code erachter), in plaats van voor elke site dezelfde vaste naam <code>scan-en-check-website.php</code> te gebruiken. Dat is veiliger (een voorspelbare naam die op elke site identiek is, is voor een geautomatiseerde aanvaller makkelijker te vinden) én zorgt ervoor dat de monitor zo'n bestand altijd herkent als van zichzelf, mocht het ergens los worden teruggevonden. De naam is bewust gekoppeld aan de monitor zelf, niet aan de domeinnaam van de site - welke site het is, is namelijk toch al overduidelijk uit de context; welke monitor het bestand daar heeft neergezet juist niet, bijvoorbeeld als een site door meerdere, losse monitor-installaties wordt gevolgd.</p>
     <p>Deze naam staat om die reden bewust <strong>vast</strong> - er is geen invulveld meer om zelf een naam te kiezen, ook niet bij het toevoegen van een nieuwe site. Draait er op een bepaalde site toch ook nog andere monitorsoftware (bijv. van iemand anders), dan kun je bij Site-instellingen op <strong>"🔄 Vervang door nieuwe, unieke naam"</strong> drukken - dat genereert een nieuwe, andere willekeurige naam, plaatst die op de site (via FTP/SFTP), en ruimt het oude bestand automatisch op. Dit is de enige manier om de naam nog te wijzigen.</p>
     <div class="tip">
         💡 Sites die zijn toegevoegd vóórdat deze functie bestond, gebruiken mogelijk nog de oude, voor elke site
@@ -602,13 +601,13 @@ th {
         zoals een ander leesteken tellen niet mee), dan verschijnt er direct na het opslaan een <strong>optionele</strong>
         melding met een knop om de bestandsnamen van alle bestaande sites in één keer bij te werken naar de nieuwe
         naam (inclusief het opruimen van het oude bestand) - dit is nooit verplicht, bestaande scanscripts blijven
-        anders gewoon werken. Gebruik je bij een site Akeeba Admin Tools' bestandsnaam-restrictie, voeg de nieuwe
-        naam daar dan zelf nog aan toe, anders blokkeert Admin Tools het zojuist hernoemde scanscript alsnog.
+        anders gewoon werken. Gebruik je bij een site een firewall-extensie met een bestandsnaam-restrictie, voeg de nieuwe
+        naam daar dan zelf nog aan toe, anders blokkeert die firewall het zojuist hernoemde scanscript alsnog.
     </div>
     <table>
         <tr><th>Categorie</th><th>Meldt wanneer</th><th>Wat er in de mail staat</th></tr>
         <tr><td>Website status</td><td>Bij één van de aangevinkte criteria: geen verbinding, HTTP-foutcode, of verdachte inhoud.</td><td><code>Website: 🔴 Offline (HTTP 500)</code></td></tr>
-        <tr><td>Joomla-versie</td><td>Als er een nieuwere versie beschikbaar is dan geïnstalleerd.</td><td><code>Joomla: 6.1.1 → nieuwste 6.1.2 beschikbaar</code></td></tr>
+        <tr><td>Joomla-versie</td><td>Als er een nieuwere versie beschikbaar is dan geïnstalleerd.</td><td><code>Joomla: geïnstalleerde versie → nieuwste versie beschikbaar</code></td></tr>
         <tr><td>Extensies</td><td>Als er één of meer extensies niet up-to-date zijn.</td><td><code>Extensies - Niet up-to-date: 3</code></td></tr>
         <tr><td>SSL-status</td><td>Alleen als het certificaat daadwerkelijk verlopen is (niet bij "bijna verlopen").</td><td><code>SSL: certificaat verlopen</code></td></tr>
         <tr><td>Beveiliging</td><td>Als er niet-vertrouwde verdachte bestanden zijn gevonden.</td><td><code>Beveiliging - Verdachte bestand(en): 2</code></td></tr>
@@ -641,7 +640,7 @@ th {
     <div class="stap"><strong>Cloaking-detectie</strong> - dezelfde twee kernbestanden (<code>index.php</code>/<code>administrator/index.php</code>) worden ook gecontroleerd op de combinatie van bot-detectiepatronen (bijv. <code>Googlebot</code>/<code>bingbot</code> in de user-agent) én code die externe inhoud ophaalt (<code>file_get_contents</code>/<code>curl_exec</code>/<code>fopen</code>). Los van elkaar komen beide soms ook onschuldig voor - de combinatie in een kernbestand is een sterk signaal voor een aanval die aan zoekmachines andere (vaak spam-/malware-)inhoud toont dan aan gewone bezoekers, precies om onopgemerkt te blijven.</div>
     <div class="stap"><strong>Massaal-hernoemen-detectie</strong> - signaleert wanneer vijf of meer bestanden/mappen in de webroot hetzelfde ongebruikelijke achtervoegsel delen (bijv. <code>bestand.php__113576e</code>). Dit patroon hoort bij een aanvalstype dat de hele website in één klap onbereikbaar maakt door vrijwel alle bestanden tegelijk te hernoemen - één zo'n bestand is toeval, vijf of meer is dat vrijwel nooit.</div>
     <div class="stap"><strong>Onzichtbare Unicode-tekens</strong> - bestandsnamen met verborgen zero-width-tekens of een RTL-omkeringsteken (een bekende truc om een kwaadaardig bestand te laten lijken op iets onschuldigs, bijv. een naam die op ".jpg" lijkt te eindigen maar in werkelijkheid ".php" is) worden apart en met hoog risico gemeld.</div>
-    <div class="stap"><strong>Verdubbelde mapnamen</strong> - een bestand in een map die direct in een map met dezelfde naam zit (bijv. <code>models/models/index.php</code>) is een bekend patroon van automatisch geplaatste backdoors. Bij een generieke Joomla-mapnaam (models, views, helpers, ...) is dat altijd een melding. Bij een andere naam is het meestal een extensie die haar eigen naam herhaalt (Kunena, GeSHi) en staat het als <strong>"ter info"</strong> onderaan - <strong>tenzij het een <code>index.php</code> is die als enige bestand in die map staat</strong>: dat is het patroon van een schuilplaats en krijgt een echte melding ("LOS PHP-BESTAND IN VERDUBBELDE MAP"). Een enkel bestand met een andere naam blijft "ter info": sommige extensies (bijv. iCagenda) zetten elke class in een eigen map met dezelfde naam, bijvoorbeeld <code>src/Utilities/Utilities/Utilities.php</code>. Let bij "ter info" op de datum: stemt die overeen met de tijd van een eerder gevonden backdoor, dan hoort het bij dezelfde aanval.</div>
+    <div class="stap"><strong>Verdubbelde mapnamen</strong> - een bestand in een map die direct in een map met dezelfde naam zit (bijv. <code>models/models/index.php</code>) is een bekend patroon van automatisch geplaatste backdoors. Bij een generieke Joomla-mapnaam (models, views, helpers, ...) is dat altijd een melding. Bij een andere naam is het meestal een extensie die haar eigen naam herhaalt en staat het als <strong>"ter info"</strong> onderaan - <strong>tenzij het een <code>index.php</code> is die als enige bestand in die map staat</strong>: dat is het patroon van een schuilplaats en krijgt een echte melding ("LOS PHP-BESTAND IN VERDUBBELDE MAP"). Een enkel bestand met een andere naam blijft "ter info": sommige extensies zetten elke class in een eigen map met dezelfde naam, bijvoorbeeld <code>src/Utilities/Utilities/Utilities.php</code>. Let bij "ter info" op de datum: stemt die overeen met de tijd van een eerder gevonden backdoor, dan hoort het bij dezelfde aanval.</div>
     <div class="tip">
         💡 Bij PATROON 9 (dynamische aanroep) en 12 (<code>create_function</code>) telt commentaar niet mee: een woord in een opmerking (bijv. in een bugnotitie) is geen aanroep. De quarantaine en prullenbak (<code>_scan_beheer/</code>) worden bij de massaal-hernoemen-detectie overgeslagen, want verplaatste bestanden krijgen daar zelf een <code>__</code>-naam.
     </div>
@@ -677,7 +676,7 @@ th {
     <p>Los van de automatische herkenning van bekende aanvallerspatronen hierboven, toont het beveiligingsrapport - als de databaseverbinding is gelukt - ook een apart blokje <strong>"👤 Super Users"</strong> met álle beheerdersaccounts: naam, gebruikersnaam, e-mail, aangemaakt, laatst ingelogd en actief/geblokkeerd. Handig om zelf even te doorlopen en te controleren of je elke naam herkent - ook een account dat (nog) geen bekend aanvallerspatroon gebruikt, valt zo alsnog op.</p>
 
     <h3>Geneste of losstaande Joomla-installaties</h3>
-    <p>Een map die zowel een eigen <code>configuration.php</code> als een eigen <code>administrator</code>-map bevat, wordt automatisch herkend als een complete, eigen Joomla-installatie - bijvoorbeeld een oude staging-kopie in een submap van de website zelf, of (bij hostingpartijen zoals Strato) een andere site die los naast de huidige in dezelfde accountroot staat. In plaats van in bulk als "onbekend" gemeld te worden, verschijnt hiervoor één duidelijke, informatieve melding, en wordt de vertrouwde-Joomla-mappenlijst er verder ook op toegepast.</p>
+    <p>Een map die zowel een eigen <code>configuration.php</code> als een eigen <code>administrator</code>-map bevat, wordt automatisch herkend als een complete, eigen Joomla-installatie - bijvoorbeeld een oude staging-kopie in een submap van de website zelf, of (bij sommige hostingpartijen) een andere site die los naast de huidige in dezelfde accountroot staat. In plaats van in bulk als "onbekend" gemeld te worden, verschijnt hiervoor één duidelijke, informatieve melding, en wordt de vertrouwde-Joomla-mappenlijst er verder ook op toegepast.</p>
 
     <h3>Verzamelmeldingen (type "cluster")</h3>
     <p>De massale-upload-detectie hierboven gaat altijd over meerdere bestanden tegelijk in dezelfde map - dat verschijnt daarom als één "Verzamelmelding" met type <strong>cluster</strong>, in plaats van een losse vondst per bestand. Zo'n melding heeft bewust geen Quarantaine/Blokkeer/Verwijder-knoppen (net als bij een "database"-vondst) - de map bevat immers ook gewoon legitieme content, dus "verwijderen" zou geen eenduidig doelwit hebben. Bekijk en verwerk de losse bestanden in dat geval handmatig via FTP; "Vertrouwen" werkt op dit type wél gewoon, en blijft ook bij een volgende, ongewijzigde scan behouden.</p>
@@ -724,8 +723,8 @@ th {
         gedaan. Controleer het genoemde bestand handmatig via FTP om zeker te zijn. Hoe meer sites dezelfde extensie
         hebben, hoe betrouwbaarder de vergelijking.
     </div>
-    <p><em>Joomla's eigen kernbestanden</em> zitten sinds versie 1.18 bewust niet meer in deze vergelijking - die hebben een eigen, preciezere vergelijking tegen het officiële Joomla-pakket, zie de sectie hieronder.</p>
-    <p><strong>Samengevoegde rijen bij dezelfde afwijking op veel bestanden tegelijk</strong> - wijken van één extensie+versie meerdere bestanden tegelijk op precies dezelfde manier af (dezelfde andere site(s) hebben steeds exact dezelfde inhoud als deze site)? Dan worden die sinds versie 1.20 samengevoegd tot één rij, bijv. "73 bestanden wijken op dezelfde manier af", in plaats van 73 losse regels. Dat wijst meestal op een andere sub-versie/build van diezelfde extensie (bijv. een Pro- versus Core-editie, of een tussentijdse hotfix zonder eigen versienummer) - géén losse verdachte bestanden. Zo'n rij staat, zolang hij nog niet is beoordeeld, standaard al opengeklapt; is hij eenmaal vertrouwd, dan klapt hij (in de aparte "vertrouwd"-sectie) weer dicht.</p>
+    <p><em>Joomla's eigen kernbestanden</em> zitten bewust niet in deze vergelijking - die hebben een eigen, preciezere vergelijking tegen het officiële Joomla-pakket, zie de sectie hieronder.</p>
+    <p><strong>Samengevoegde rijen bij dezelfde afwijking op veel bestanden tegelijk</strong> - wijken van één extensie+versie meerdere bestanden tegelijk op precies dezelfde manier af (dezelfde andere site(s) hebben steeds exact dezelfde inhoud als deze site)? Dan worden die samengevoegd tot één rij, bijv. "73 bestanden wijken op dezelfde manier af", in plaats van 73 losse regels. Dat wijst meestal op een andere sub-versie/build van diezelfde extensie (bijv. een Pro- versus Core-editie, of een tussentijdse hotfix zonder eigen versienummer) - géén losse verdachte bestanden. Zo'n rij staat, zolang hij nog niet is beoordeeld, standaard al opengeklapt; is hij eenmaal vertrouwd, dan klapt hij (in de aparte "vertrouwd"-sectie) weer dicht.</p>
     <div class="stap"><strong>"Vertrouw alle N"</strong> - staat boven de "Actie"-kolom, bovenaan zo'n samengevoegde rij. Vertrouwt in één keer alle bestanden uit die rij, in plaats van elk bestand los te moeten aanklikken (met een voortgangsteller tijdens het verwerken). De losse "Vertrouwen"-knop per bestand blijft daarnaast gewoon bestaan, voor het geval je binnen een samengevoegde rij toch een uitzondering wil maken.</div>
     <div class="tip">
         💡 Staat een bestand NIET in zo'n samengevoegde rij, maar los ertussen? Dan wijkt dat ene bestand af op een
@@ -734,7 +733,7 @@ th {
     </div>
 
     <h3>Kernbestand-integriteit tegen het officiële Joomla-pakket</h3>
-    <p>Naast de meerderheidsvergelijking hierboven (die kijkt naar wat de MEESTE van je eigen sites hebben) staat er, als er iets gevonden is, een aparte sectie <strong>"🛡️ Kernbestanden vs. officieel Joomla-pakket"</strong> - een rechtstreekse vergelijking met het officiële, ongewijzigde Joomla-pakket van downloads.joomla.org. Dat pakket wordt altijd op de monitor zelf gedownload, nooit op een klantsite, en maar één keer per daadwerkelijk voorkomende Joomla-kernversie.</p>
+    <p>Naast de meerderheidsvergelijking hierboven (die kijkt naar wat de MEESTE van je eigen sites hebben) staat er, als er iets gevonden is, een aparte sectie <strong>"🛡️ Kernbestanden vs. officieel Joomla-pakket"</strong> - een rechtstreekse vergelijking met het officiële, ongewijzigde Joomla-pakket van de officiële Joomla-downloadserver. Dat pakket wordt altijd op de monitor zelf gedownload, nooit op een klantsite, en maar één keer per daadwerkelijk voorkomende Joomla-kernversie.</p>
     <div class="tip">
         💡 Deze vergelijking dekt twee gevallen waar de meerderheidsvergelijking hierboven niets kan zeggen: een
         Joomla-kernversie die maar op één van je sites voorkomt (geen andere site om tegen af te zetten), en een
@@ -766,7 +765,7 @@ th {
     <h3>Extensieoverzicht (per site)</h3>
     <p>Klik in de kolom "Extensies" op de status van een site voor het volledige overzicht: alle gedetecteerde extensies van derden, met geïnstalleerde versie, nieuwste versie en status.</p>
     <p>Losse plugins/modules die duidelijk bij hetzelfde product horen (bijv. tientallen losse widget-plugins van één page builder) worden automatisch samengevoegd tot één rij, op basis van pakket-koppeling (<code>package_id</code>) en herkenning van gedeelde herkomst (map/element-naam + auteur, ongevoelig voor accentverschillen zoals "é" versus "e"). Zo'n rij toont dan bijv. "plugin (12x)" in de type-kolom.</p>
-    <p>Bekende Joomla-kernonderdelen en vaste pakket-onderdelen die geen eigen update-feed nodig hebben (bijv. "Wie is online", "Aangepaste module", "Nieuwsflits", of losse onderdelen van Akeeba Backup/AcyMailing) worden automatisch buiten het extensieoverzicht gehouden - kom je toch nog een onderdeel tegen dat hier evident bij zou moeten horen, geef dat dan door.</p>
+    <p>Bekende Joomla-kernonderdelen en vaste pakket-onderdelen die geen eigen update-feed nodig hebben (bijv. "Wie is online", "Aangepaste module", "Nieuwsflits", of losse onderdelen van een groter pakket) worden automatisch buiten het extensieoverzicht gehouden - kom je toch nog een onderdeel tegen dat hier evident bij zou moeten horen, geef dat dan door.</p>
     <div class="tip">
         💡 Schrijft een ontwikkelaar het auteursveld per extensie inconsistent (bijv. de naam in wisselende
         volgorde)? Dan worden losse onderdelen soms niet automatisch aan hetzelfde hoofdproduct gekoppeld. Voor
@@ -775,6 +774,21 @@ th {
     </div>
     <p>Bovenaan deze pagina staat ook een gele knop om alleen deze ene site opnieuw te scannen (zie hoofdstuk 5).</p>
     <p>Via <strong>"Toon ook genegeerde extensies"</strong> zie je ook de extensies die je (op deze of een andere site) hebt weggenegeerd, herkenbaar gemarkeerd - met daarbij een "Herstel"-knop in plaats van "Negeren". Bestaat een rij uit meerdere onderliggende onderdelen (bijv. een component + een losse plugin die samen zijn gegroepeerd), dan werken Negeren en Herstel altijd op <strong>alle</strong> onderdelen tegelijk - een rij verdwijnt dus pas echt als je op "Negeren" klikt, in plaats van dat er onzichtbaar nog een deel actief blijft staan.</p>
+
+    <h4>Feed geblokkeerd vanaf de site: de monitor haalt hem centraal op</h4>
+    <p>Het scanscript haalt de nieuwste versie van elke extensie op via de update-locatie die Joomla zelf kent, vanaf de server van de site. Sommige update-servers blokkeren verzoeken van websites - bijvoorbeeld met een botbeveiliging die een captchapagina of "HTTP 403" terugstuurt in plaats van de feed. Zo'n beveiliging slaat vaak juist aan als veel sites vlak na elkaar dezelfde feed opvragen, zoals bij "alles scannen".</p>
+    <p>Het scanscript vraagt een update-feed op precies dezelfde manier op als de eigen updatecontrole van Joomla (Extensies &gt; Updaten), met dezelfde afzender. Als vuistregel geldt daardoor: kan Joomla zelf in de beheeromgeving van een site een feed openen, dan kan het scanscript op die site dat ook - en meldt Joomla daar "Kan updatesite niet openen", dan lukt het het scanscript op die site evenmin.</p>
+    <p>Daarom werkt de monitor zo, zonder dat je iets hoeft in te stellen:</p>
+    <ul>
+        <li><strong>De monitor leert zelf welke update-servers blokkeren.</strong> Krijgt een site (of de monitor zelf) een captchapagina of HTTP 403/429, dan wordt die server onthouden (60 dagen na de laatste blokkade).</li>
+        <li><strong>De sites vragen die feeds daarna niet meer zelf op.</strong> Bij het starten van een scan geeft de monitor deze servers mee aan het scanscript; in de scanuitvoer (📋) staat bij zo'n feed "CENTRAAL".</li>
+        <li><strong>Hooguit eens per 12 uur haalt één site zo'n feed op, bij toerbeurt</strong> - voor alle sites samen één verzoek per feed, in plaats van één per site. De monitor wijst die site aan bij het starten van een scan; in de scanuitvoer staat dan "OK (namens de monitor opgehaald, geldt voor alle sites)". Die site stuurt de feed mee naar de monitor, die hem voor alle andere sites gebruikt. Lukt het bij die site niet, dan mag al na een uur een site op een andere server het proberen (een blokkade bij de ene hostingpartij zegt niets over de andere); zijn alle servers geweest, dan geldt weer de wachttijd van 12 uur.</li>
+        <li><strong>De monitor zelf probeert het alleen als er geen site aan de beurt is geweest</strong>, en wacht na een blokkade 3 dagen - de server van de monitor kan door zo'n update-server ook zelf geblokkeerd worden.</li>
+        <li><strong>De laatst bekende versie blijft staan.</strong> Lukt een poging niet, dan wordt de versie van de laatste geslaagde ophaalactie gebruikt. Op het extensieoverzicht van een site staat in het blok "Centraal opgehaalde update-feeds" wanneer dat was, en hoe de laatste poging via een site afliep.</li>
+    </ul>
+    <p>Er komt hiervoor niets in de extensiecatalogus en er wordt niets naar Github gestuurd. Taalbestanden doen hier niet aan mee, omdat hun versie aan de Joomla-versie van de site zelf gebonden is. Heeft de monitor een feed nog nooit kunnen ophalen, dan blijft de extensie "Onbekend" totdat het een keer lukt.</p>
+    <p><strong>Zelf een site aanwijzen.</strong> De monitor onthoudt via welke sites het ophalen lukte en kiest die voortaan als eerste; sites waar het onlangs mislukte, slaat hij zo veel mogelijk over. Wil je niet wachten, of weet je van een site dat Joomla zelf de feed daar wel kan openen (Extensies &gt; Updaten toont daar geen "Kan updatesite niet openen")? Open dan het extensieoverzicht van die site en druk in het blok "Centraal opgehaalde update-feeds" op <em>"🚀 Probeer nu via deze site"</em>. De site wordt opnieuw gescand en haalt de feeds daarbij zelf op, zonder wachttijd. Lukt het, dan geldt het resultaat meteen voor alle sites.</p>
+    <p><strong>Weigert de update-server alle automatische verzoeken?</strong> Dan kun je de versie zelf invullen. In het blok "Centraal opgehaalde update-feeds" op het extensieoverzicht staat bij elke feed een link <em>"Open de feed in je browser"</em> en een invoerveld. In je eigen browser werkt zo'n feed doorgaans wel: lees daar het versienummer af, vul het in en druk op "Opslaan". Die versie geldt meteen voor alle sites met die extensie, en er staat bij wanneer je hem hebt ingevuld. Lukt het automatisch ophalen later weer, dan neemt dat het vanzelf over; een leeg veld opslaan wist de handmatige versie.</p>
 
     <h3>Extensietabel beheren</h3>
     <p>Extensies zonder automatisch gevonden nieuwste versie (omdat Joomla zelf geen update-locatie voor die extensie kent) worden automatisch toegevoegd aan de catalogus. Ga naar "🧩 Extensietabel beheren" (via het extensieoverzicht) om zelf een update-feed-URL in te vullen - bijvoorbeeld gevonden via de Joomla Extensions Directory of de site van de ontwikkelaar zelf.</p>
@@ -796,7 +810,7 @@ th {
     <p>Per rij kun je:</p>
     <ul>
         <li><strong>Negeren</strong> - de rij verdwijnt volledig uit het overzicht en komt (in tegenstelling tot verwijderen) niet terug na een nieuwe scan. Via "Toon ook genegeerde extensies" kun je ze bekijken en eventueel herstellen - daarbij staat ook sinds wanneer een extensie genegeerd is.</li>
-        <li><strong>Alleen x.xx.y negeren</strong> - minder ingrijpend dan gewoon negeren: de extensie blijft gewoon zichtbaar en de up-to-date-status wordt nog steeds bijgehouden, alleen het laatste, door een punt gescheiden onderdeel van het versienummer telt niet meer mee. Bedoeld voor extensies (met name taalbestanden) die een eigen, veelvuldig bijgewerkt build-nummer achter de eigenlijke versie plakken - bijv. Joomla-taalbestanden, waarvan de versie "6.1.2.1" er bij een kleine vertaalcorrectie al snel "6.1.2.3" van wordt, zonder dat dit een echte, nieuwe (Joomla-aangeboden) update betreft. Met deze knop tellen alleen de eerste drie onderdelen (hier: "6.1.2") mee bij het bepalen van "up-to-date" - een klik op dezelfde knop ("x.x.x.y weer tonen") maakt dit weer ongedaan.</li>
+        <li><strong>Alleen x.xx.y negeren</strong> - minder ingrijpend dan gewoon negeren: de extensie blijft gewoon zichtbaar en de up-to-date-status wordt nog steeds bijgehouden, alleen het laatste, door een punt gescheiden onderdeel van het versienummer telt niet meer mee. Bedoeld voor extensies (met name taalbestanden) die een eigen, veelvuldig bijgewerkt build-nummer achter de eigenlijke versie plakken - bijv. Joomla-taalbestanden, waarvan het vierde onderdeel van het versienummer bij elke kleine vertaalcorrectie ophoogt, zonder dat dit een echte, nieuwe (Joomla-aangeboden) update betreft. Met deze knop tellen alleen de eerste drie onderdelen mee bij het bepalen van "up-to-date" - een klik op dezelfde knop ("x.x.x.y weer tonen") maakt dit weer ongedaan.</li>
         <li><strong>🧹 Negeer alle libraries/taalbestanden</strong> - één knop bovenaan die in één keer alle gedeelde libraries en vertaalbestanden wegnegeert (die krijgen toch nooit een eigen update-feed).</li>
     </ul>
     <div class="tip">
@@ -812,7 +826,7 @@ th {
     </div>
 
     <div class="tip">
-        💡 Extensies die uit veel losse onderdelen bestaan (bijv. VirtueMart: één package plus tientallen eigen
+        💡 Extensies die uit veel losse onderdelen bestaan (één package plus tientallen eigen
         modules/plugins) worden samengevoegd tot één rij. Daarbij wordt altijd de <strong>hoogste</strong> "nieuwste
         versie" onder al die onderdelen getoond - niet zomaar die van het eerst-verwerkte onderdeel - en telt een
         overduidelijk kapotte versiestring (bijv. een vergeten build-variabele als <code>${PHING.VERSION}</code>, die
@@ -828,7 +842,7 @@ th {
     <p>Is bij Configuratie een Github-token ingevuld, dan staan er bij het update-feed-veld <strong>twee</strong> opslaanknoppen in plaats van één:</p>
     <ul>
         <li><strong>Opslaan met GitHub Sync</strong> - de gewone, standaard keuze: de nieuwe/gewijzigde URL wordt meteen naar de gedeelde Github-catalogus gepusht, zodat andere installaties (bijv. van een collega) 'm via de melding hierboven kunnen overnemen.</li>
-        <li><strong>Opslaan zonder GitHub Sync</strong> - voor een uitzondering die alleen voor déze installatie geldt. Typisch scenario: een extensie waarvan de reguliere update-feed voor de meeste mensen prima werkt, maar bij jouw specifieke hostingpartij structureel geblokkeerd wordt (bijv. het bekende Kunena/Strato-503-probleem). Vul in dat geval een alternatieve URL in - bijv. exact dezelfde, officiële feed-URL nogmaals, zodat de monitor zelf (vanaf een andere server, met een andere IP-reeks) 'm ophaalt in plaats van de geblokkeerde site zelf - en sla op zonder synchronisatie: die uitzondering hoeft immers niet voor andere installaties te gelden, waar de gewone weg allang werkt.</li>
+        <li><strong>Opslaan zonder GitHub Sync</strong> - voor een uitzondering die alleen voor déze installatie geldt. Typisch scenario: een extensie waarvan de reguliere update-feed voor de meeste mensen prima werkt, maar bij jouw specifieke hostingpartij structureel geblokkeerd wordt. Vul in dat geval een alternatieve URL in - bijv. exact dezelfde, officiële feed-URL nogmaals, zodat de monitor zelf (vanaf een andere server, met een andere IP-reeks) 'm ophaalt in plaats van de geblokkeerde site zelf - en sla op zonder synchronisatie: die uitzondering hoeft immers niet voor andere installaties te gelden, waar de gewone weg allang werkt.</li>
     </ul>
     <p>Elke rij toont een badge die aangeeft hoe de huidige URL is opgeslagen: <span class="badge badge-groen">☁️ gedeeld via Github</span> of <span class="badge badge-oranje">💻 lokaal (niet op Github)</span>. Een bewust-lokale rij wordt gegarandeerd nooit meegenomen in een push naar Github (ook niet als die wordt getriggerd door het opslaan van een heel andere rij) en verschijnt ook nooit in de importmelding hierboven - je hoeft dus niet bang te zijn dat 'm per ongeluk weer wordt overschreven.</p>
     <p>Is er geen Github-token ingevuld bij Configuratie, dan zie je gewoon de simpele, originele "Opslaan"-knop - de keuze is dan toch niet relevant, want zonder token kan er sowieso niet naar Github geschreven worden.</p>
@@ -856,7 +870,7 @@ th {
         aandacht eerst" te wisselen. Klik je op een ándere kolomkop, dan start die altijd weer in de normale
         richting voor die kolom.
     </div>
-    <p>"Joomla" sorteert in meerdere stappen na elkaar, zodat een oudere hoofdversie altijd voorrang krijgt boven de status daarbinnen: eerst op <strong>hoofdversie</strong> (bijv. Joomla 3.x altijd boven 5.x, ook als die 3.x-site toevallig zelf al de nieuwste 3.x is - "up-to-date binnen de eigen hoofdversie" zegt namelijk niets over hoe oud die hoofdversie zelf is); binnen dezelfde hoofdversie dan op status (verouderd 🔴 vóór onbekend vóór up-to-date ✅); en binnen dezelfde hoofdversie én status tot slot op het exacte versienummer (oudste eerst). Sites zonder Joomla-versiedata staan altijd onderaan.</p>
+    <p>"Joomla" sorteert in meerdere stappen na elkaar, zodat een oudere hoofdversie altijd voorrang krijgt boven de status daarbinnen: eerst op <strong>hoofdversie</strong> (een site op een oudere hoofdversie staat altijd boven een site op een nieuwere, ook als die oudere site binnen haar eigen hoofdversie helemaal bij is - "up-to-date binnen de eigen hoofdversie" zegt namelijk niets over hoe oud die hoofdversie zelf is); binnen dezelfde hoofdversie dan op status (verouderd 🔴 vóór onbekend vóór up-to-date ✅); en binnen dezelfde hoofdversie én status tot slot op het exacte versienummer (oudste eerst). Sites zonder Joomla-versiedata staan altijd onderaan.</p>
 
     <div class="tip">
         💡 Vóór elke domeinnaam staat het favicon van die website (met een klein icoontje van Joomla zelf als
@@ -887,7 +901,7 @@ th {
         Bevat een wachtwoord of gebruikersnaam tóch zo'n teken, dan blijft de site gewoon te beheren: de knop
         kopieert het wachtwoord (en zo nodig ook de gebruikersnaam) dan automatisch naar je klembord en opent
         FileZilla zonder die gegevens in de link, zodat je ze alleen nog hoeft te plakken. Een gebruikersnaam met
-        een "@" erin (bijv. een door de hostingpartij toegewezen "klantnummer@domein.nl"-login, vaak bij Strato)
+        een "@" erin (bijv. een door de hostingpartij toegewezen login in de vorm "klantnummer@domein")
         kan meestal niet worden aangepast - daar blijft deze kopieerstap dus altijd nodig, ongeacht het wachtwoord.
     </div>
 
@@ -939,7 +953,7 @@ th {
     </div>
 
     <div class="tip">
-        💡 <strong>Liever geen registeraanpassing?</strong> <a href="https://winscp.net/" target="_blank" rel="noopener">WinSCP</a>
+        💡 <strong>Liever geen registeraanpassing?</strong> WinSCP
         is een gratis, open-source alternatief voor Windows dat minstens zo makkelijk werkt als FileZilla, en zich
         - in tegenstelling tot de gratis FileZilla Client - vaak automatisch registreert als handler voor
         <code>ftp://</code>, <code>sftp://</code>, <code>ftps://</code> en <code>ftpes://</code>-links. Werkt het toch
@@ -949,7 +963,7 @@ th {
     </div>
 
     <div class="tip">
-        💡 <strong>Op een Mac?</strong> <a href="https://cyberduck.io/" target="_blank" rel="noopener">Cyberduck</a> is
+        💡 <strong>Op een Mac?</strong> Cyberduck is
         een gratis, open-source FTP/SFTP-programma voor macOS (en Windows) dat minstens zo makkelijk werkt als
         FileZilla. Cyberduck controleert bij elke opstart zelf of het al is ingesteld als standaardhandler voor
         FTP/SFTP - is dat nog niet zo, dan verschijnt er gewoon een pop-upvenster met de vraag of je dat wil
@@ -1013,7 +1027,7 @@ th {
     <p>Boven de tabel staat per hostingpartij het aantal sites. Klik op een naam om alleen die sites te tonen.</p>
 
     <h3 id="hosting-server">Server</h3>
-    <p>De naam van de computer waarop de website draait, bijvoorbeeld <code>server123.hostingpartij.nl</code>. Sites met dezelfde servernaam
+    <p>De naam van de computer waarop de website draait, meestal een servernummer gevolgd door de naam van de hostingpartij. Sites met dezelfde servernaam
     delen dus één server. Daaronder staat het netwerk (AS-nummer) van de hostingpartij.</p>
     <p>Met het <strong>pijltje ▾</strong> in de kolomkop filter je op één of meer servers: vink aan welke je wilt zien en klik op
     <strong>Toepassen</strong>. Het pijltje wordt geel zolang het filter actief is; <strong>Filter wissen</strong> toont weer alles.
@@ -1038,11 +1052,11 @@ th {
     <h2>14. Veelvoorkomende problemen</h2>
 
     <h3>Een site geeft plotseling 403 (offline) op alles</h3>
-    <p>Vaak een beveiligingsplugin (bijv. Akeeba Admin Tools) die het IP-adres van de monitor tijdelijk blokkeert, omdat de scans er als verdacht verkeer uitzien. Zet het IP-adres van de monitor in de "Exceptions" van die plugin (zie het stappenplan bij "Site toevoegen").</p>
+    <p>Vaak een beveiligingsplugin die het IP-adres van de monitor tijdelijk blokkeert, omdat de scans er als verdacht verkeer uitzien. Zet het IP-adres van de monitor in de "Exceptions" van die plugin (zie het stappenplan bij "Site toevoegen").</p>
 
     <h3>Een beheeractie (Bekijk/Quarantaine/Blokkeer/Verwijder) geeft "HTTP 403"</h3>
     <p>Bevat de foutmelding de tekst <strong>"Request forbidden by administrative rules"</strong>? Dan blokkeert <strong>mod_security</strong> - een firewall die de hostingpartij zelf op serverniveau instelt - dit specifieke verzoek al vóórdat het bij Joomla of het scanscript aankomt. Dit is geen instelling die vanuit de monitor is te omzeilen; neem contact op met de hostingpartij en vraag om een uitzondering voor POST-verzoeken naar <code>scan-en-check-website.php</code>. Gebruik tot die tijd gewoon FTP voor deze ene site.</p>
-    <p>Een andere HTTP-foutcode? De melding toont sinds versie 1.3 ook een fragment van de daadwerkelijk ontvangen inhoud - dat helpt vaak al om de oorzaak (een andere beveiligingsplugin, een verlopen sessie, een verouderd scanscript) te herkennen.</p>
+    <p>Een andere HTTP-foutcode? De melding toont ook een fragment van de daadwerkelijk ontvangen inhoud - dat helpt vaak al om de oorzaak (een andere beveiligingsplugin, een verlopen sessie, een verouderd scanscript) te herkennen.</p>
 
     <h3>Een scan starten of een beheeractie geeft "Onverwacht antwoord (HTTP 301)"</h3>
     <p>Dit wijst op een omleiding op de site zelf (bijv. http naar https, of www naar non-www) - de monitor volgt zo'n omleiding automatisch, maar krijgt in dit geval alsnog de omleidingspagina zelf terug in plaats van het scanscript. Controleer of er een <code>.htaccess</code>-bestand in de hoofdmap van de site (of een daarboven liggende map) staat dat het verzoek ergens anders naartoe stuurt, en of dat de bedoeling is.</p>
@@ -1051,7 +1065,7 @@ th {
     <p>Dat is bijna altijd een webapplicatie-firewall (mod_security) van de hostingpartij, die het verzoek of het antwoord blokkeert - los van de monitor en van Joomla. Bij "Bekijk" gebeurt dat soms om de <strong>inhoud</strong> van het bestand zelf, bijvoorbeeld bij verdachte JavaScript of PHP-code in het antwoord. Het scanscript op de site is dan dus niet weg en ook niet verouderd. Bekijk het bestand via FTP, of vraag de hostingpartij om een uitzondering voor POST-verzoeken naar het scanscript. Gebeurt het bij elk bestand, ook bij bestanden zonder verdachte inhoud, laat het dan weten.</p>
 
     <h3>Het 📋-scanrapport toont steeds dezelfde (oude) tijd, of een herscan meldt "verouderd antwoord"</h3>
-    <p>Een scanscript dat echt draait toont bij <strong>"Start:"</strong> altijd de actuele tijd. Zie je na meerdere scans steeds dezelfde tijd, dan komt het antwoord uit een <strong>cache</strong> (de browser, Cloudflare of de paginacache van de hostingpartij, bijv. LiteSpeed of Varnish) en draait het scanscript helemaal niet - dus er komt ook geen nieuw resultaat aan. Sinds versie 1.23 stuurt het scanscript headers mee die caching verbieden, vraagt de monitor elke keer een unieke URL op (<code>?nc=...</code>) en waarschuwt een herscan met "verouderd antwoord" als er toch een oud antwoord terugkomt. Blijft het gebeuren, dan houdt de cache zich niet aan die headers. Dan kun je:</p>
+    <p>Een scanscript dat echt draait toont bij <strong>"Start:"</strong> altijd de actuele tijd. Zie je na meerdere scans steeds dezelfde tijd, dan komt het antwoord uit een <strong>cache</strong> (de browser, Cloudflare of de paginacache van de hostingpartij, bijv. LiteSpeed of Varnish) en draait het scanscript helemaal niet - dus er komt ook geen nieuw resultaat aan. Het scanscript stuurt headers mee die caching verbieden, vraagt de monitor elke keer een unieke URL op (<code>?nc=...</code>) en waarschuwt een herscan met "verouderd antwoord" als er toch een oud antwoord terugkomt. Blijft het gebeuren, dan houdt de cache zich niet aan die headers. Dan kun je:</p>
     <div class="stap">1. <strong>Controleren</strong> - open het scanscript in een privévenster, en kijk in de netwerktab van je browser (F12) naar de responsheaders: <code>Age</code>, <code>X-Cache</code>, <code>CF-Cache-Status</code> of <code>X-LiteSpeed-Cache</code> met de waarde HIT verraadt de cache-laag.</div>
     <div class="stap">2. <strong>Uitsluiten van caching</strong> - zet de bestandsnaam van het scanscript op de uitzonderingslijst van de cache (bijv. "Do Not Cache URIs" in een LiteSpeed-cacheplugin, of een Cloudflare-regel "Bypass cache" voor die URL), of vraag de hostingpartij dat te doen.</div>
     <div class="stap">3. <strong>Of hernoemen</strong> - vervang het scanscript bij Site-instellingen door een nieuwe, unieke naam: een nieuwe bestandsnaam is een nieuwe URL, zonder oude cache-invoer. Vergeet niet de nieuwe naam ook toe te voegen aan de uitzonderingen van een eventuele beveiligingsplugin (zie hoofdstuk 4).</div>
@@ -1061,7 +1075,7 @@ th {
     <p>Twijfel je of je via FTP wel in dezelfde map kijkt als waar de scan draait? De scanuitvoer begint met <strong>"Scanmap: ..."</strong> - dat is het echte pad; alle paden in het rapport (bv. <code>/images/foto.gif</code>) zijn relatief aan die map.</p>
 
     <h3>Extensieoverzicht blijft "Onbekend" tonen</h3>
-    <p>Controleer of <code>scan-en-check-website.php</code> wel op de site staat en of de laatste scan is gelukt. Vul anders zelf een update-feed-URL in via "Extensietabel beheren".</p>
+    <p>Controleer of <code>scan-en-check-website.php</code> wel op de site staat en of de laatste scan is gelukt. Kijk in de scanuitvoer (📋) bij "Details per extensie" en onder "=== MONITOR ===" of het ophalen van de feed mislukte, en of de monitor het daarna zelf wel lukte (zie "Feed geblokkeerd vanaf de site" in hoofdstuk 10 - bij een centraal opgehaalde feed staat er "CENTRAAL", en op het extensieoverzicht staat wanneer de monitor hem voor het laatst kon ophalen). Wordt de feed ook vanaf de monitor geblokkeerd, of kent Joomla zelf geen update-locatie voor de extensie, vul dan zelf een update-feed-URL in via "Extensietabel beheren".</p>
 
     <h3>Joomla-versie blijft leeg op de overzichtspagina</h3>
     <p>Dit is een ander mechanisme dan de extensies: de Joomla-kernversie wordt via het admin-pad opgehaald (zie hoofdstuk 3/4). Controleer bij Site-instellingen of het admin-pad correct is ingevuld.</p>

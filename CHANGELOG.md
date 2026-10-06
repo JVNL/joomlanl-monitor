@@ -1,5 +1,13 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.30 - 2026-10-06
+
+### Scanscript: PHP in de afbeeldingsmap en nummermappen (`scan_template.php`)
+Een webshell-kit liet in drie submappen van `images/` een leeg `index.php` achter, met daarnaast een nummermap met alleen een `.htaccess` die alle PHP weigert behalve `index.php` (zelfbescherming van de kit). De scan meldde hier niets van.
+
+- **Elk PHP-bestand onder `images/` wordt nu gemeld**, ongeacht inhoud of grootte (risico 75, met "0 bytes" erbij als het leeg is). Joomla en normale extensies zetten daar geen PHP neer. Tot nu toe werd zo'n bestand alleen inhoudelijk gescand, en een leeg bestand werd daarbij overgeslagen.
+- **Nummermappen (bv. `116117`) worden nu gewoon recursief gescand.** Voorheen werden alleen de PHP-bestanden direct in zo'n map bekeken: een `.htaccess` of submap erin bleef onzichtbaar. De bestaande `.htaccess`-controle meldt de zelfbeschermingsregel nu als kritiek.
+
 ## 1.29 - 2026-10-03
 
 ### Nieuwste versies van extensies waarvan de update-server websites blokkeert (nieuw: `feed_terugval_functies.php`, `feed_handmatige_versie.php`; `scan_template.php`, `ontvang_scan.php`, `start_scan.php`, `haal_versies_op.php`, `extensies.php`, `index.php`, `auto_migratie.php`)

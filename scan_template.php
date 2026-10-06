@@ -3568,19 +3568,12 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                 ];
             }
 
-            // Speciale aandacht voor nummermappen
-            if (preg_match('/^\d{4,}$/', $item)) {
-                // Scan alle PHP in nummergegeven map
-                $subItems = @scandir($volledigPad);
-                if ($subItems) {
-                    foreach ($subItems as $subItem) {
-                        if (isPhpUitvoerbareExtensie($subItem)
-                            && !isBekendeLegitiemeLibrary($volledigPad . '/' . $subItem, $startMap)) {
-                            scanPhpVoorBackdoors($volledigPad . '/' . $subItem, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden);
-                        }
-                    }
-                }
-            } else {
+            // Nummermappen (116117, 262449 ...) werden vroeger apart behandeld: alleen de PHP-bestanden direct erin
+            // werden gescand, zonder recursie. Daardoor bleef de rest van de inhoud onzichtbaar, o.a. de
+            // zelfbeschermings-.htaccess (FilesMatch: alle PHP weigeren behalve index.php) die in september 2026 in
+            // images/sampledata/cassiopeia/116117/ en images/yootheme/262449/ stond. Nu gewoon recursief zoals elke
+            // map; PATROON 5 (index.php met eval in een nummermap) zit in scanPhpVoorBackdoors() en blijft werken.
+            {
                 // Normale map: scan recursief. Zodra we op het eerste niveau
                 // een bekende uploadmap tegenkomen (images/tmp/media), geldt
                 // dat voor de hele submap eronder, ongeacht hoe diep - vandaar
@@ -3646,6 +3639,27 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                     'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
                     'grootte' => (int) @filesize($volledigPad),
                 ];
+            }
+
+            // Elk PHP-uitvoerbaar bestand onder images/ van de website zelf, ongeacht inhoud of grootte. Joomla en
+            // normale extensies zetten daar nooit PHP neer (alleen afbeeldingen/uploads); de inhoudscontrole hierboven
+            // vangt alleen bekende patronen en slaat lege bestanden over. Aangetroffen (september 2026):
+            // images/banners/index.php, images/sampledata/cassiopeia/index.php en images/yootheme/index.php,
+            // die door geen enkel inhoudspatroon werden gemeld.
+            if ($heeftPhpUitvoerbareExtensie && strpos($volledigPad, $startMap . '/') === 0) {
+                $relatiefPad = str_replace('\\', '/', substr($volledigPad, strlen($startMap) + 1));
+                if (stripos($relatiefPad, 'images/') === 0) {
+                    $grootteImages = (int) @filesize($volledigPad);
+                    $backdoorVondsten[] = [
+                        'naam' => '/' . $relatiefPad,
+                        'reden' => 'PHP-uitvoerbaar bestand in de afbeeldingsmap (images/' . ($grootteImages === 0 ? ', 0 bytes' : '') . ') - Joomla en normale '
+                            . 'extensies zetten daar geen PHP neer; mogelijke webshell of ingang voor een volgende besmetting, VERDACHT',
+                        'risico' => 75,
+                        'bestandspad' => $volledigPad,
+                        'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
+                        'grootte' => $grootteImages,
+                    ];
+                }
             }
 
             // .htaccess-bestanden: apart scannen op zelfbeschermings-/locatiepatronen

@@ -1,5 +1,22 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.32 - 2026-10-07
+
+### Scanscript: scanbudget op = melding, en de tussenniveaus vallen er niet meer onder (`scan_template.php`)
+De bestandsscan heeft één gedeeld budget voor de hele scan (20.000 items of 45 seconden). Was dat op, dan stopte de scan stil: de rest werd niet bekeken, terwijl het rapport er volledig uitzag. Op een grote site met een volle accountroot gebeurde dat vóórdat de tussenniveaus uit 1.31 aan de beurt waren, waardoor een kwaadaardige `.htaccess` boven `public_html` niet werd gemeld (de backdoor ernaast wel, via de aparte PHP-regel).
+
+- **Losse bestanden op de tussenniveaus** (`.htaccess`, PHP-bestanden, `php.ini`/`.user.ini`) worden nu rechtstreeks gecontroleerd, buiten het budget om. Het zijn er maar een paar per niveau. De tussenniveaus worden bovendien vóór de rest van de accountroot gescand.
+- **Nieuw: melding "SCAN ONVOLLEDIG"** (risico 50) zodra het budget op is, met de plek waar de scan stopte. Ook in de ruwe scanuitvoer.
+- **Het budget gaat van 20.000 naar 150.000 items.** Een grote site met een `.htaccess` in vrijwel elke map haalde de oude grens al na 7 seconden, ruim voordat de tijdsgrens (45 seconden) bereikt was; daardoor werd een deel van de website zelf niet gescand. De tijdsgrens blijft de bescherming tegen een time-out.
+- In de ruwe scanuitvoer staat per tussenniveau welke losse bestanden er zijn gezien, met grootte, rechten en of PHP ze kan lezen.
+- **`.htaccess` in een map `awstats` wordt niet meer helemaal overgeslagen.** De uitzondering op mapnaam geldt alleen nog voor de lichte melding "ongebruikelijke .htaccess"; de kritieke patronen (zelfbeschermende FilesMatch-regel, cloaking-RewriteRule) worden daar nu ook gemeld. Aanleiding: in een `awstats`-map naast `public_html` stond dezelfde kwaadaardige `.htaccess` als in de domeinmap, samen met twee backdoors.
+
+### Beveiligingsrapport: lange vondstenlijst werd stil afgekapt (`auto_migratie.php`, `ontvang_scan.php`)
+De vondsten van een site worden opgeslagen in één databasekolom van het type TEXT, met een maximum van 65.535 bytes. Bij een zwaar besmette site (ruim 3.000 vondsten, samen ongeveer 1 MB) kapte MySQL de lijst zonder foutmelding af: het rapport toonde er ruim 200, een beschrijving stopte midden in een woord, en alles achteraan de lijst ontbrak, waaronder vondsten buiten de website-root en de melding "scan onvolledig".
+
+- **Migratiestap 24** zet de kolom om naar MEDIUMTEXT (maximaal 16 MB). Dat gebeurt automatisch bij het eerste gebruik na de update; er is geen handmatige SQL nodig.
+- Past een lijst daar ooit nog niet in, dan wordt hij ingekort met een duidelijke slotregel "LIJST INGEKORT" in plaats van stil.
+
 ## 1.31 - 2026-10-07
 
 ### Beveiligingsrapport: een vertrouwd bestand wordt herkend aan zijn inhoud, niet aan zijn wijzigingsdatum (`scan_template.php`, `ontvang_scan.php`, `verdacht_functies.php`)

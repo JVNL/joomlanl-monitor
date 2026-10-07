@@ -151,16 +151,18 @@ $bouwDetails = function (array $vondsten, bool $metInhoud): string {
 
 $details = $bouwDetails($vondsten, true);
 
-// De kolom verdacht_details is een TEXT-kolom (maximaal 65.535 bytes). De
-// vingerafdrukken maken elke regel iets langer; past het geheel daardoor net
-// niet meer (alleen denkbaar bij honderden vondsten tegelijk), dan liever de
-// vingerafdrukken weglaten dan het hele scanresultaat niet kunnen opslaan.
-// De vondsten worden dan herkend aan hun wijzigingsdatum, zoals voorheen.
-if (strlen($details) > 65000) {
-    $detailsZonderInhoud = $bouwDetails($vondsten, false);
-    if (strlen($detailsZonderInhoud) <= 65000) {
-        $details = $detailsZonderInhoud;
-    }
+// De kolom verdacht_details is een MEDIUMTEXT-kolom (maximaal 16 MB, sinds migratiestap 24; daarvoor TEXT met
+// maximaal 65.535 bytes, waardoor een lange lijst stil werd afgekapt). Past het geheel met vingerafdrukken niet,
+// dan zonder; past het dan nog steeds niet, dan de lijst inkorten met een duidelijke slotregel, zodat nooit
+// ongemerkt vondsten wegvallen.
+$maxDetailsBytes = 16000000;
+if (strlen($details) > $maxDetailsBytes) {
+    $details = $bouwDetails($vondsten, false);
+}
+if (strlen($details) > $maxDetailsBytes) {
+    $details = substr($details, 0, $maxDetailsBytes);
+    $details = substr($details, 0, (int) strrpos($details, "\n") + 1);
+    $details .= maakVondstRegel('cluster', 'LIJST INGEKORT', '', 'LIJST INGEKORT - te veel vondsten om op te slaan; bekijk de ruwe scanuitvoer voor de volledige lijst', 50, null) . "\n";
 }
 
 $stmt = $pdo->prepare("

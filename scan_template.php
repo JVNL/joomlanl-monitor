@@ -3109,13 +3109,14 @@ function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap)
     }
 
     // AWStats is een losse, door de hostingpartij zelf geplaatste tool voor
-    // bezoekersstatistieken - geen onderdeel van de Joomla-site zelf, en
-    // dus geen extensie die wij hoeven te bewaken. Uitgesloten op mapnaam
-    // (niet op inhoud, want AWStats' eigen .htaccess varieert per versie).
-    $mapNaamKleinLetters = strtolower(basename(dirname($bestandpad)));
-    if ($mapNaamKleinLetters === 'awstats') {
-        return;
-    }
+    // bezoekersstatistieken - geen onderdeel van de Joomla-site zelf. Op
+    // mapnaam uitgezonderd, maar ALLEEN van de lichte "ongebruikelijke
+    // .htaccess"-melding hieronder (AWStats' eigen .htaccess varieert per
+    // versie). De kritieke patronen worden ook hier gewoon gemeld: in
+    // oktober 2026 stond in awstats/ precies dezelfde kwaadaardige .htaccess
+    // (plus twee backdoors), die door een volledige uitzondering op mapnaam
+    // onzichtbaar bleef.
+    $isAwstatsMap = strtolower(basename(dirname($bestandpad))) === 'awstats';
 
     // Akeeba Backup (zowel de oudere "com_akeeba" als de nieuwere
     // "com_akeebabackup"-naamgeving) plaatst standaard een eigen
@@ -3163,7 +3164,7 @@ function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap)
     // bewust een klein defensief .htaccess-je ("deny from all") in hun eigen
     // map om directory-browsing te blokkeren. Alleen melden als aparte,
     // lichte waarschuwing zodat je het kan verifiëren, niet als kritiek.
-    if (!$kritiek) {
+    if (!$kritiek && !$isAwstatsMap) {
         $genormaliseerdeRoot = rtrim(str_replace('\\', '/', $startMap), '/');
         $genormaliseerdeMap = rtrim(str_replace('\\', '/', dirname($bestandpad)), '/');
         $isKleinDefensiefBlok = strlen($inhoud) < 400 && !preg_match('/RewriteRule|RewriteCond|FilesMatch/i', $inhoud);
@@ -3561,7 +3562,7 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
     // vroegtijdige afronding.
     static $totaalVerwerkteItems = 0;
     static $scanStartTijd = null;
-    $maxTotaalTeVerwerken = 20000;
+    $maxTotaalTeVerwerken = 150000; // was 20.000: een grote site met een .htaccess in vrijwel elke map haalde dat al na 7 seconden (oktober 2026); de tijdsgrens hieronder is de eigenlijke bescherming tegen een time-out
     $maxSecondenVoorRecursie = 45; // flink onder de set_time_limit(120) hierboven, zodat er ruim voldoende marge overblijft voor extensies/Super Users/het verzenden van het resultaat hierna
 
     if ($scanStartTijd === null) {
@@ -3569,6 +3570,7 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
     }
 
     if ($totaalVerwerkteItems >= $maxTotaalTeVerwerken || (microtime(true) - $scanStartTijd) > $maxSecondenVoorRecursie) {
+        $GLOBALS['scanBudgetOp'] = $GLOBALS['scanBudgetOp'] ?? $pad;
         return;
     }
 
@@ -3587,6 +3589,7 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
 
     foreach ($items as $item) {
         if ($totaalVerwerkteItems >= $maxTotaalTeVerwerken || (microtime(true) - $scanStartTijd) > $maxSecondenVoorRecursie) {
+            $GLOBALS['scanBudgetOp'] = $GLOBALS['scanBudgetOp'] ?? ($pad . '/' . $item);
             return;
         }
 
@@ -5556,24 +5559,6 @@ if (!$extraScanIngeschakeld) {
 
     $aantalVoorExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
 
-    // Rechtenafwijkingen op het topniveau zelf (checkExtraScanpadTopNiveau()) meetellen in de melding hieronder -
-    // die telde voorheen alleen de afwijkingen diéper in het extra scanpad, en gaf daardoor "0 afwijkende rechten"
-    // terwijl er in de lijst wel een stond.
-    $telRechtenAfwijkingen = function (array $items): int {
-        return count(array_filter($items, function ($item) {
-            return strpos((string) ($item['reden_override'] ?? ''), 'Afwijkende rechten') === 0;
-        }));
-    };
-    $rechtenTopNiveauVoor = $telRechtenAfwijkingen($rootLevelUnknown);
-    checkExtraScanpadTopNiveau($extraScanRootAbsoluut, $rootLevelUnknown, $extraScanPadNegeren, $startMap);
-    $rechtenTopNiveau = $telRechtenAfwijkingen($rootLevelUnknown) - $rechtenTopNiveauVoor;
-
-    $rechtenAfwijkingenExtra = [];
-    scanRecursief($extraScanRootAbsoluut, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0, $extraScanPadNegeren, $rechtenAfwijkingenExtra);
-    foreach ($rechtenAfwijkingenExtra as $afwijking) {
-        $rootLevelUnknown[] = $afwijking;
-    }
-
     // Tussenliggende niveaus tussen de accountroot en de website-root. Bij DirectAdmin staat de website in
     // domains/<domein>/public_html: hierboven wordt op het topniveau het complete pad naar de eigen site
     // ("domains") uitgesloten, waardoor de losse bestanden in domains/ en in domains/<domein>/ nooit werden
@@ -5603,7 +5588,38 @@ if (!$extraScanIngeschakeld) {
             } else {
                 $tussenNegeren = array_values(array_unique(array_merge($extraScanPadNegeren, [$volgendeStap])));
             }
-            scanRecursief($tussenPad, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0, $tussenNegeren, $geenRechtencontrole);
+            // Losse bestanden op dit niveau rechtstreeks controleren, BUITEN het gedeelde scanbudget van scanRecursief()
+            // om: het zijn er maar een handvol, en juist hier stonden de backdoor en de .htaccess. Op een grote site
+            // was dat budget (aantal items / tijd) al op voordat dit niveau aan de beurt kwam, waardoor de .htaccess
+            // stil werd overgeslagen. Submappen (stats, awstats, public_ftp ...) gaan wel via scanRecursief(),
+            // met alle losse bestanden van dit niveau op de negeerlijst zodat niets dubbel wordt gemeld.
+            $tussenBestanden = [];
+            foreach ($tussenItems as $tussenItem) {
+                if ($tussenItem !== '.' && $tussenItem !== '..' && is_file($tussenPad . '/' . $tussenItem)) {
+                    $tussenBestanden[] = $tussenItem;
+                }
+            }
+            // In de ruwe scanuitvoer: welke losse bestanden op dit niveau gezien zijn, met grootte en of PHP ze kan lezen.
+            $tussenOverzicht = [];
+            foreach ($tussenBestanden as $tussenItem) {
+                $tb = $tussenPad . '/' . $tussenItem;
+                $tussenOverzicht[] = $tussenItem . ' (' . (int) @filesize($tb) . ' b, ' . substr(sprintf('%o', (int) @fileperms($tb)), -4)
+                    . (is_readable($tb) ? '' : ', NIET LEESBAAR') . ')';
+            }
+            echo 'Tussenniveau ' . $tussenPad . ': ' . (empty($tussenOverzicht) ? 'geen losse bestanden' : implode(', ', $tussenOverzicht)) . "\n";
+
+            foreach ($tussenBestanden as $tussenItem) {
+                $tussenBestand = $tussenPad . '/' . $tussenItem;
+                if (isPhpUitvoerbareExtensie($tussenItem)) {
+                    scanPhpVoorBackdoors($tussenBestand, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden);
+                } elseif (strtolower($tussenItem) === '.htaccess') {
+                    scanHtaccessVoorMalware($tussenBestand, $htaccessVondsten, $startMap);
+                } elseif (strtolower($tussenItem) === 'php.ini' || strtolower($tussenItem) === '.user.ini') {
+                    scanPhpIniVoorVerzwakkingen($tussenBestand, $backdoorVondsten, $startMap);
+                }
+            }
+            scanRecursief($tussenPad, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0,
+                array_values(array_unique(array_merge($tussenNegeren, $tussenBestanden))), $geenRechtencontrole);
 
             // Elk los PHP-bestand op zo'n tussenniveau melden, ongeacht inhoud: de hostingpartij en Joomla zetten
             // daar nooit PHP neer. Vangt ook (sterk) geobfusceerde backdoors die geen inhoudspatroon raken.
@@ -5627,12 +5643,51 @@ if (!$extraScanIngeschakeld) {
         }
     }
 
+
+    // Rechtenafwijkingen op het topniveau zelf (checkExtraScanpadTopNiveau()) meetellen in de melding hieronder -
+    // die telde voorheen alleen de afwijkingen diéper in het extra scanpad, en gaf daardoor "0 afwijkende rechten"
+    // terwijl er in de lijst wel een stond.
+    $telRechtenAfwijkingen = function (array $items): int {
+        return count(array_filter($items, function ($item) {
+            return strpos((string) ($item['reden_override'] ?? ''), 'Afwijkende rechten') === 0;
+        }));
+    };
+    $rechtenTopNiveauVoor = $telRechtenAfwijkingen($rootLevelUnknown);
+    checkExtraScanpadTopNiveau($extraScanRootAbsoluut, $rootLevelUnknown, $extraScanPadNegeren, $startMap);
+    $rechtenTopNiveau = $telRechtenAfwijkingen($rootLevelUnknown) - $rechtenTopNiveauVoor;
+
+    $rechtenAfwijkingenExtra = [];
+    scanRecursief($extraScanRootAbsoluut, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0, $extraScanPadNegeren, $rechtenAfwijkingenExtra);
+    foreach ($rechtenAfwijkingenExtra as $afwijking) {
+        $rootLevelUnknown[] = $afwijking;
+    }
+
     $aantalNaExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
     $extraScanMelding = "Extra map \"$extraScanRootAbsoluut\" meegescand ($extraScanNiveauGebruikt niveau(s) boven de website-root, automatisch bepaald: "
         . ($aantalNaExtraScan - $aantalVoorExtraScan) . " extra vondst(en) daar gevonden, "
         . (count($rechtenAfwijkingenExtra) + $rechtenTopNiveau) . " afwijkende rechten gesignaleerd)."
         . ' Standaard overgeslagen: ' . implode(', ', $standaardExtraScanpadNegeren) . '.'
         . (!empty($extraScanPadNegerenEigen) ? ' Zelf ook overgeslagen: ' . implode(', ', $extraScanPadNegerenEigen) . '.' : '');
+}
+
+// Scanbudget van scanRecursief() op (zie daar: maximaal aantal items / seconden voor de hele scan)? Dan is een deel
+// van de bestanden niet bekeken. Voorheen gebeurde dat stil, waardoor een onvolledige scan er volledig uitzag
+// (aanleiding oktober 2026: een kwaadaardige .htaccess boven public_html werd op een grote site zo overgeslagen).
+if (!empty($GLOBALS['scanBudgetOp'])) {
+    $rootLevelUnknown[] = [
+        // Type 'cluster' (verzamelmelding): geen beheeracties als Quarantaine/Verwijder in de monitor; naam zonder
+        // haakjes, zie de toelichting bij vindMassaleUpload().
+        'type' => 'cluster',
+        'naam' => 'SCAN ONVOLLEDIG - scanbudget bereikt',
+        'pad' => (string) $GLOBALS['scanBudgetOp'],
+        'risico' => 50,
+        'gewijzigd' => date('Y-m-d H:i'),
+        'reden_override' => 'SCAN ONVOLLEDIG - het maximale aantal bestanden of de maximale scantijd is bereikt; de bestandsscan is gestopt bij "'
+            . str_replace($startMap, '', (string) $GLOBALS['scanBudgetOp']) . '". Alles daarna (op deze plek en verderop in de scanvolgorde) '
+            . 'is niet op verdachte inhoud gecontroleerd. Bij een grote site of een volle accountroot: ruim onnodige bestanden op, of sluit '
+            . 'grote mappen buiten de website uit via de site-instellingen.',
+    ];
+    echo "⚠️ Scanbudget bereikt: bestandsscan gestopt bij " . $GLOBALS['scanBudgetOp'] . " - resultaat onvolledig.\n";
 }
 
 // Kernbestand-integriteitscontrole: code vóór Joomla's _JEXEC-bootstrap

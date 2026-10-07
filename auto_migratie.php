@@ -528,6 +528,27 @@ function haalMigraties(): array
             zorgVoorFeedTerugvalTabel($pdo);
         },
 
+        // ----------------------------------------------------------------
+        // Stap 24 (versie 1.32): verdacht_details van TEXT (max. 65.535 bytes)
+        // naar MEDIUMTEXT (max. 16 MB). Bij een zwaar besmette site (oktober
+        // 2026: ruim 3.000 vondsten, samen ongeveer 1 MB) kapte MySQL de lijst
+        // stil af: het rapport toonde er ruim 200, een beschrijving stopte
+        // midden in een woord, en alles achteraan de lijst (o.a. vondsten
+        // buiten de website-root en de melding "scan onvolledig") ontbrak.
+        // Idempotent: alleen als de kolom nog geen MEDIUMTEXT/LONGTEXT is.
+        // ----------------------------------------------------------------
+        24 => function (PDO $pdo) {
+            $stmt = $pdo->prepare("
+                SELECT DATA_TYPE FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sites' AND COLUMN_NAME = 'verdacht_details'
+            ");
+            $stmt->execute();
+            $type = strtolower((string) $stmt->fetchColumn());
+            if ($type !== '' && $type !== 'mediumtext' && $type !== 'longtext') {
+                $pdo->exec("ALTER TABLE `sites` MODIFY `verdacht_details` MEDIUMTEXT NULL DEFAULT NULL");
+            }
+        },
+
     ];
 }
 

@@ -73,6 +73,7 @@ if (isset($data['backdoors']) && is_array($data['backdoors'])) {
             'gewijzigd' => $b['gewijzigd'] ?? '',
             'reden'     => $b['reden'] ?? '',
             'risico'    => $b['risico'] ?? null,
+            'inhoud'    => $b['inhoud_hash'] ?? null,
         ];
     }
 }
@@ -88,6 +89,7 @@ if (isset($data['htaccess_verdacht']) && is_array($data['htaccess_verdacht'])) {
             'gewijzigd' => $h['gewijzigd'] ?? '',
             'reden'     => $h['reden'] ?? '',
             'risico'    => $h['risico'] ?? null,
+            'inhoud'    => $h['inhoud_hash'] ?? null,
         ];
     }
 }
@@ -103,6 +105,7 @@ if (isset($data['root_unknown']) && is_array($data['root_unknown'])) {
             // (bijv. backup-configuratiebestanden) - anders de generieke tekst.
             'reden'     => $r['reden_override'] ?? 'onbekend root-level item',
             'risico'    => $r['risico'] ?? null,
+            'inhoud'    => $r['inhoud_hash'] ?? null,
         ];
     }
 }
@@ -124,14 +127,40 @@ if (isset($data['database_verdacht']) && is_array($data['database_verdacht'])) {
 
 $aantal = count($vondsten);
 
-$details = '';
-foreach ($vondsten as $vondst) {
-    $type = $vondst['type'] ?? '?';
-    $naam = $vondst['naam'] ?? '?';
-    $gewijzigd = $vondst['gewijzigd'] ?? '?';
-    $reden = $vondst['reden'] ?? '?';
-    $risico = $vondst['risico'] ?? bepaalRisico($reden);
-    $details .= "[{$type}] {$naam} ({$gewijzigd}) - {$reden} [risico={$risico}]\n";
+// Per vondst één regel (zie maakVondstRegel()/parseVerdachtDetails() in
+// verdacht_functies.php). Stuurt het scanscript bij een bestand een
+// inhoud-vingerafdruk mee, dan komt die erbij: daarmee herkent de monitor
+// het bestand bij een volgende scan aan zijn INHOUD in plaats van aan zijn
+// wijzigingsdatum. Een bestand dat steeds opnieuw wordt weggeschreven met
+// exact dezelfde inhoud, wordt zo niet telkens opnieuw als "nieuw" gemeld.
+$bouwDetails = function (array $vondsten, bool $metInhoud): string {
+    $details = '';
+    foreach ($vondsten as $vondst) {
+        $reden = (string) ($vondst['reden'] ?? '?');
+        $details .= maakVondstRegel(
+            (string) ($vondst['type'] ?? '?'),
+            (string) ($vondst['naam'] ?? '?'),
+            (string) ($vondst['gewijzigd'] ?? '?'),
+            $reden,
+            (int) ($vondst['risico'] ?? bepaalRisico($reden)),
+            $metInhoud ? ($vondst['inhoud'] ?? null) : null
+        ) . "\n";
+    }
+    return $details;
+};
+
+$details = $bouwDetails($vondsten, true);
+
+// De kolom verdacht_details is een TEXT-kolom (maximaal 65.535 bytes). De
+// vingerafdrukken maken elke regel iets langer; past het geheel daardoor net
+// niet meer (alleen denkbaar bij honderden vondsten tegelijk), dan liever de
+// vingerafdrukken weglaten dan het hele scanresultaat niet kunnen opslaan.
+// De vondsten worden dan herkend aan hun wijzigingsdatum, zoals voorheen.
+if (strlen($details) > 65000) {
+    $detailsZonderInhoud = $bouwDetails($vondsten, false);
+    if (strlen($detailsZonderInhoud) <= 65000) {
+        $details = $detailsZonderInhoud;
+    }
 }
 
 $stmt = $pdo->prepare("
@@ -151,6 +180,25 @@ if ($stmt->rowCount() === 0) {
     echo "Waarschuwing: geen site gevonden in database met domein '$domeinVoorVergelijk'.";
 } else {
     echo "OK: scanresultaat opgeslagen voor $domeinVoorVergelijk ($aantal verdachte item(s)).";
+}
+
+// --------------------------------------------------------------------
+// Bestaand vertrouwen overzetten van "zelfde wijzigingsdatum" naar "zelfde
+// inhoud", voor vondsten waarvan nu een inhoud-vingerafdruk bekend is.
+// Voorkomt dat eerder vertrouwde, ongewijzigde bestanden na het bijwerken
+// van het scanscript allemaal één keer opnieuw als "nieuw" verschijnen. Zie
+// zetVertrouwenOverOpInhoud() voor wanneer dat wel en niet gebeurt.
+// --------------------------------------------------------------------
+if ($siteId) {
+    try {
+        $aantalOvergezet = zetVertrouwenOverOpInhoud($pdo, (int) $siteId, parseVerdachtDetails($details));
+        if ($aantalOvergezet > 0) {
+            echo "\nOK: bij $aantalOvergezet eerder vertrouwd(e) bestand(en) is het vertrouwen nu aan de inhoud gekoppeld in plaats van aan de wijzigingsdatum.";
+        }
+    } catch (\Throwable $e) {
+        // Nooit de verwerking van de scan zelf laten mislukken hierdoor.
+        echo "\nWaarschuwing: bestaand vertrouwen kon niet aan de inhoud worden gekoppeld - " . $e->getMessage();
+    }
 }
 
 // --------------------------------------------------------------------

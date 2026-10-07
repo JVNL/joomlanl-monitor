@@ -1590,9 +1590,12 @@ function renderGenummerdeRegels(regels) {
 
 /**
  * Sluit het losse bekijk-venster (#bekijk-viewer) - of, bij "Bekijk" op meerdere items tegelijk,
- * alleen het paneel van dat ene item - zodra het getoonde bestand is verwijderd, in quarantaine
- * gezet of geblokkeerd. Zonder dit bleef de inhoud van een bestand dat al niet meer bestaat
- * gewoon in beeld staan.
+ * alleen het paneel van dat ene item - zodra de vondst is afgehandeld: vertrouwd (of juist niet
+ * meer vertrouwd), verwijderd, in quarantaine gezet of geblokkeerd. Zonder dit bleef de inhoud
+ * van een bestand in beeld staan terwijl de bijbehorende regel al uit de lijst was verdwenen.
+ *
+ * Bewust NIET bij "Rechten herstellen": dat verandert niets aan de vondst zelf - de regel blijft
+ * staan en je moet het bestand daarna meestal nog beoordelen.
  */
 function sluitViewerVoorPad(pad) {
     const viewer = document.getElementById('bekijk-viewer');
@@ -1629,7 +1632,14 @@ function beheerBekijk(knop, viewerId = 'bekijk-viewer', siteId = SITE_ID, siteLa
     viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>⏳ Laden...</strong></div></div>';
     viewer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
+    // Het losse bekijk-venster kan intussen al zijn gesloten door een actieknop (zie sluitViewerVoorPad()),
+    // of al een ander bestand tonen. Een antwoord dat dan nog binnenkomt, mag het venster niet opnieuw vullen.
+    const nogActueel = () => viewerId !== 'bekijk-viewer' || viewer.dataset.pad === pad;
+
     beheerFetch('bekijk', { pad: pad }, knop, siteId).then(data => {
+        if (!nogActueel()) {
+            return;
+        }
         if (!data.succes) {
             viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>❌ ' + escapeHtml(data.foutmelding) + '</strong></div></div>';
             return;
@@ -1671,6 +1681,9 @@ function beheerBekijk(knop, viewerId = 'bekijk-viewer', siteId = SITE_ID, siteLa
             pasRegelDiffToe(paarPrefix);
         }
     }).catch(err => {
+        if (!nogActueel()) {
+            return;
+        }
         viewer.innerHTML = '<div class="viewer"><div class="kop"><strong>❌ Er ging iets mis: ' + escapeHtml(err.message) + '</strong></div></div>';
     });
 }
@@ -1915,6 +1928,7 @@ function bulkVertrouwen() {
             .then(data => {
                 if (data.ok) {
                     const rij = cb.closest('tr');
+                    sluitViewerVoorPad(rij.dataset.pad);
                     rij.classList.add('vertrouwd-rij');
                     const knop = rij.querySelector('.vertrouwen-knop');
                     if (knop) {
@@ -2220,6 +2234,10 @@ function wisselVertrouwen(knop) {
 
         const wordtVertrouwd = !nuVertrouwd;
 
+        // Staat dit bestand open in het bekijk-venster? Dan dat venster meteen sluiten - de vondst
+        // is nu afgehandeld, dus de inhoud hoort niet in beeld te blijven staan.
+        sluitViewerVoorPad(rij.dataset.pad);
+
         // Tellers direct bijwerken.
         if (wordtVertrouwd) {
             huidigVertrouwd++;
@@ -2233,13 +2251,18 @@ function wisselVertrouwen(knop) {
         if (!TOON_ALLES && wordtVertrouwd) {
             // In de standaardweergave (alleen nieuwe items) verdwijnt
             // een net vertrouwd item direct uit de lijst.
+            // De tabel van DEZE rij onthouden vóórdat de rij verdwijnt. Voorheen werd hier simpelweg de eerste
+            // tabel van de pagina gepakt - maar dat is het Super Users-overzicht, niet de vondstenlijst. Daardoor
+            // bleef na het vertrouwen van het laatste item een lege tabel (alleen de kolomkoppen) staan, zonder
+            // de melding hieronder.
+            const tabel = rij.closest('table');
+
             rij.style.transition = 'opacity 0.3s';
             rij.style.opacity = '0';
             setTimeout(() => {
                 rij.remove();
 
                 // Als er geen rijen meer over zijn, toon een netjes bericht.
-                const tabel = document.querySelector('table');
                 if (tabel && tabel.querySelectorAll('tbody tr, tr').length <= 1) {
                     const melding = document.createElement('div');
                     melding.className = 'leeg';

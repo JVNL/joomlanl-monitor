@@ -1638,6 +1638,55 @@ function voegDubbeleVondstenSamen(array &$backdoorVondsten, array &$rootLevelUnk
 }
 
 /**
+ * Geeft elke vondst die over één los bestand gaat een inhoud-vingerafdruk mee ('inhoud_hash': de eerste 32
+ * hexadecimale tekens van de sha256 van het bestand). De monitor herkent het bestand daarmee bij een volgende
+ * scan aan zijn INHOUD in plaats van aan zijn wijzigingsdatum.
+ *
+ * Waarom: sommige programma's schrijven hun eigen bestanden regelmatig opnieuw weg met exact dezelfde inhoud
+ * (bijvoorbeeld als zelfherstel). De wijzigingsdatum verspringt dan bij elke keer, terwijl er inhoudelijk niets
+ * verandert - met als gevolg dat een bestand dat al beoordeeld en vertrouwd was, bij elke scan opnieuw als
+ * "nieuw" werd gemeld. Andersom is de datum ook eenvoudig terug te zetten na een echte wijziging; de inhoud niet.
+ *
+ * Bewust één centrale stap vlak voor het versturen, in plaats van op elke plek waar een vondst wordt aangemaakt:
+ * zo geldt dit vanzelf voor alle bestaande én toekomstige soorten vondsten, zonder dat er een lijst van
+ * bestandsnamen, mappen of programma's voor hoeft te worden bijgehouden.
+ *
+ * Geen vingerafdruk (de monitor valt dan terug op de wijzigingsdatum, zoals voorheen) bij:
+ *  - mappen, verzamelmeldingen en database-vondsten: daar is geen "ene" bestandsinhoud;
+ *  - bestanden die niet leesbaar zijn;
+ *  - bestanden groter dan $maxBytes (denk aan een back-uparchief in de root): die bij elke scan volledig inlezen
+ *    kost te veel tijd;
+ *  - alles na de eerste $maxBestanden bestanden, als noodrem bij een uitzonderlijk groot aantal vondsten.
+ */
+function voegInhoudVingerafdrukkenToe(array &$vondsten, int &$aantalGedaan, int $maxBestanden = 2000, int $maxBytes = 16777216): void
+{
+    foreach ($vondsten as &$vondst) {
+        if ($aantalGedaan >= $maxBestanden) {
+            break;
+        }
+
+        $pad = $vondst['bestandspad'] ?? ($vondst['pad'] ?? null);
+        if (!is_string($pad) || $pad === '' || !@is_file($pad) || !@is_readable($pad)) {
+            continue;
+        }
+
+        $grootte = @filesize($pad);
+        if ($grootte === false || $grootte > $maxBytes) {
+            continue;
+        }
+
+        $sha256 = @hash_file('sha256', $pad);
+        if (!is_string($sha256) || strlen($sha256) !== 64) {
+            continue;
+        }
+
+        $vondst['inhoud_hash'] = substr($sha256, 0, 32);
+        $aantalGedaan++;
+    }
+    unset($vondst);
+}
+
+/**
  * Splitst PHP-code op in aparte "scopes": de body van elke functie/methode/closure als los blok,
  * plus de rest (buiten elke functie) als laatste blok. Gebruikt om detecteerEvalOpVerzoekinvoer()
  * per functie te laten kijken i.p.v. over het hele bestand heen - anders wordt een variabele die in
@@ -2177,6 +2226,42 @@ function detecteerVerborgenLader(string $inhoud): ?array
         'reden' => 'VERBORGEN LADER - ' . implode('; ', $signalen) . ', ZEKER BACKDOOR',
         'payloads' => array_keys($payloads),
     ];
+}
+
+/**
+ * Herkent een achterdeur die zijn functienamen uit een tekentabel opbouwt in plaats van ze leesbaar in de code te zetten.
+ * Aangetroffen (oktober 2026, als filefuns.php in de domeinmap boven public_html, samen met een .htaccess die een vaste
+ * set backdoornamen toelaat): alle code opgeknipt met tientallen goto-sprongen; de naam "range" opgebouwd uit losse
+ * ge-escapete tekens ("\x72" . "\141" . ...); daarmee een tabel van alle tekens van "~" tot spatie; en alle gevaarlijke
+ * functienamen (create_function, base64_decode, file_get_contents, filter_input ...) alleen als getallenreeksen die
+ * via die tabel worden vertaald. In de tekst staat dus nergens een herkenbare functienaam, alleen eval() zelf, en
+ * geen van de andere patronen sloeg aan. Alleen in combinatie gemeld: eval() + veel goto + minstens één van de twee
+ * tabeltrucs - die combinatie komt in normale code niet voor.
+ */
+function detecteerTekentabelObfuscatie(string $inhoud): ?string
+{
+    if (!preg_match('/\beval\s*\(/i', $inhoud)) {
+        return null;
+    }
+    $aantalGotos = preg_match_all('/\bgoto\s+[A-Za-z_]\w*\s*;/', $inhoud);
+    if ($aantalGotos < 5) {
+        return null;
+    }
+
+    $esc = '"\\\\(?:x[0-9a-fA-F]{1,2}|[0-7]{1,3})"';
+    $signalen = [];
+    if (preg_match('/(?:' . $esc . '\s*\.\s*){3,}' . $esc . '/', $inhoud)) {
+        $signalen[] = 'functienaam opgebouwd uit losse ge-escapete tekens ("\\x72" . "\\141" . ...)';
+    }
+    if (preg_match('/\(\s*["\'](?:~|\\\\176|\\\\x7[eE])["\']\s*,\s*["\'](?: |\\\\40|\\\\x20)["\']\s*\)/', $inhoud)) {
+        $signalen[] = 'tekentabel van "~" tot spatie (range) om functienamen uit getallen te vertalen';
+    }
+    if (empty($signalen)) {
+        return null;
+    }
+
+    return 'GEOBFUSCEERDE ACHTERDEUR - ' . $aantalGotos . 'x goto i.c.m. eval(); ' . implode('; ', $signalen)
+        . ' - functienamen zijn zo onzichtbaar gemaakt voor scanners, ZEKER BACKDOOR';
 }
 
 /**
@@ -2934,6 +3019,18 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         }
     }
 
+    // PATROON 29: functienamen uit een tekentabel (goto + eval + range-tabel / losse ge-escapete tekens) - zie
+    // detecteerTekentabelObfuscatie().
+    $tabelMelding = detecteerTekentabelObfuscatie($inhoud);
+    if ($tabelMelding !== null) {
+        if ($verdacht) {
+            $reden .= ' [+ ' . $tabelMelding . ']';
+        } else {
+            $reden = $tabelMelding;
+            $verdacht = true;
+        }
+    }
+
     // PATROON 26: eval()/assert() op invoer uit het verzoek - ook via tussenvariabelen en een "versleutel"-stap.
     // Wordt óók uitgevoerd als het bestand al door een ander patroon (bv. de locatie) is gemeld: de inhoudelijke reden
     // hoort er dan bij, want dat is het bewijs dat het echt een achterdeur is en niet alleen een verdachte plek.
@@ -3650,14 +3747,54 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                 $relatiefPad = str_replace('\\', '/', substr($volledigPad, strlen($startMap) + 1));
                 if (stripos($relatiefPad, 'images/') === 0) {
                     $grootteImages = (int) @filesize($volledigPad);
+                    // Databestand met een die()-kop (bv. een Akeeba-backuplog): kan zelf geen code uitvoeren, maar wordt
+                    // toch gemeld - met een eigen, lagere melding. Aangetroffen (oktober 2026): een site die de Akeeba-
+                    // uitvoermap in images/ had gezet, waardoor ook de complete back-uparchieven (met configuration.php
+                    // en de databasedump) publiek downloadbaar waren. Niet overslaan dus: zo blijft zichtbaar wat er staat.
+                    if (isNietUitvoerbaarPhpDatabestand($volledigPad)) {
+                        $redenImages = 'Databestand met .php-extensie en een die()-kop (bv. een Akeeba-backuplog) in de afbeeldingsmap (images/) - '
+                            . 'zelf geen achterdeur, maar wijst op een back-up- of logmap op een publiek bereikbare plek. Controleer of er '
+                            . 'back-uparchieven naast staan en zet de uitvoermap terug naar een afgeschermde map';
+                        $risicoImages = 45;
+                    } else {
+                        $redenImages = 'PHP-uitvoerbaar bestand in de afbeeldingsmap (images/' . ($grootteImages === 0 ? ', 0 bytes' : '') . ') - Joomla en normale '
+                            . 'extensies zetten daar geen PHP neer; mogelijke webshell of ingang voor een volgende besmetting, VERDACHT';
+                        $risicoImages = 75;
+                    }
                     $backdoorVondsten[] = [
                         'naam' => '/' . $relatiefPad,
-                        'reden' => 'PHP-uitvoerbaar bestand in de afbeeldingsmap (images/' . ($grootteImages === 0 ? ', 0 bytes' : '') . ') - Joomla en normale '
-                            . 'extensies zetten daar geen PHP neer; mogelijke webshell of ingang voor een volgende besmetting, VERDACHT',
-                        'risico' => 75,
+                        'reden' => $redenImages,
+                        'risico' => $risicoImages,
                         'bestandspad' => $volledigPad,
                         'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
                         'grootte' => $grootteImages,
+                    ];
+                }
+            }
+
+            // Back-uparchief of databasedump binnen de website-root, buiten de afgeschermde standaardmap van Akeeba Backup.
+            // Zo'n archief bevat de complete site incl. configuration.php (databasewachtwoord, geheime sleutel) en de
+            // database met gebruikers; op een gewone plek is het als statisch bestand direct te downloaden, en de
+            // bestandsnamen (site + datum/tijd) zijn goed te raden. Aangetroffen (oktober 2026): Akeeba-uitvoermap in images/.
+            if (strpos($volledigPad, $startMap . '/') === 0
+                && preg_match('/\.(?:jpa|jps|j\d{2}|sql|sql\.gz|sql\.zip|sql\.bz2)$/i', $item)) {
+                $relatiefBackup = str_replace('\\', '/', substr($volledigPad, strlen($startMap) + 1));
+                $inAkeebaStandaardmap = (bool) preg_match('#^administrator/components/com_akeeba(?:backup)?/backup/#i', $relatiefBackup);
+                // Extensies (en Joomla zelf: ~100 stuks in com_admin/sql/updates/) leveren .sql-installatiebestanden mee, altijd
+                // in een map "sql" of in de vendor-map; die zijn geen dump. Een Akeeba-archief (.jpa/.jps/.jNN) wordt altijd gemeld.
+                $isMeegeleverdSql = !preg_match('/\.(?:jpa|jps|j\d{2})$/i', $item)
+                    && preg_match('#(?:^|/)(?:sql|installation)/|^libraries/vendor/#i', $relatiefBackup);
+                if (!$inAkeebaStandaardmap && !$isMeegeleverdSql) {
+                    $backdoorVondsten[] = [
+                        'naam' => '/' . $relatiefBackup,
+                        'reden' => 'BACK-UPARCHIEF / DATABASEDUMP binnen de website-root, buiten de afgeschermde standaardmap van Akeeba Backup - '
+                            . 'bevat vrijwel zeker configuration.php (databasewachtwoord) en/of de database met gebruikers, en is waarschijnlijk '
+                            . 'rechtstreeks te downloaden. Verplaatsen naar een afgeschermde map of buiten de webroot, en bij twijfel '
+                            . 'databasewachtwoord en beheerderswachtwoorden wijzigen',
+                        'risico' => 70,
+                        'bestandspad' => $volledigPad,
+                        'gewijzigd' => date('Y-m-d H:i', @filemtime($volledigPad) ?: time()),
+                        'grootte' => (int) @filesize($volledigPad),
                     ];
                 }
             }
@@ -5432,6 +5569,59 @@ if (!$extraScanIngeschakeld) {
         $rootLevelUnknown[] = $afwijking;
     }
 
+    // Tussenliggende niveaus tussen de accountroot en de website-root. Bij DirectAdmin staat de website in
+    // domains/<domein>/public_html: hierboven wordt op het topniveau het complete pad naar de eigen site
+    // ("domains") uitgesloten, waardoor de losse bestanden in domains/ en in domains/<domein>/ nooit werden
+    // bekeken. Juist daar stonden (oktober 2026) een backdoor en een kwaadaardige .htaccess, één map boven
+    // public_html. Daarom elk tussenliggend niveau apart scannen, zonder de keten naar de website zelf:
+    // - een map "domains" (container van alle sites op het account): alleen de losse bestanden erin,
+    //   de submappen zijn andere sites en worden via hun eigen monitor-item gescand;
+    // - overige tussenliggende mappen (bv. de domeinmap): alles behalve de volgende stap naar de website
+    //   en de standaard-uitsluitlijst (public_html, logs, tmp ...). private_html valt af via de realpath-
+    //   controle in scanRecursief() (symlink naar public_html).
+    // Geen rechtencontrole hier: DirectAdmin-mappen als stats/awstats hebben eigen, afwijkende rechten.
+    if ($eigenSubmapNaam !== null && $eigenSubmapNaam !== '') {
+        $ketenDelen = explode('/', ltrim(substr($startMap, strlen($extraScanRootAbsoluut)), '/'));
+        $tussenPad = $extraScanRootAbsoluut;
+        $geenRechtencontrole = null;
+        for ($i = 0; $i < count($ketenDelen) - 1; $i++) {
+            $tussenPad .= '/' . $ketenDelen[$i];
+            $volgendeStap = $ketenDelen[$i + 1];
+            if (!is_dir($tussenPad) || !is_readable($tussenPad)) {
+                break;
+            }
+            $tussenItems = @scandir($tussenPad) ?: [];
+            if (strtolower(basename($tussenPad)) === 'domains') {
+                $tussenNegeren = array_values(array_filter($tussenItems, function ($it) use ($tussenPad) {
+                    return $it !== '.' && $it !== '..' && is_dir($tussenPad . '/' . $it);
+                }));
+            } else {
+                $tussenNegeren = array_values(array_unique(array_merge($extraScanPadNegeren, [$volgendeStap])));
+            }
+            scanRecursief($tussenPad, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap, 0, $tussenNegeren, $geenRechtencontrole);
+
+            // Elk los PHP-bestand op zo'n tussenniveau melden, ongeacht inhoud: de hostingpartij en Joomla zetten
+            // daar nooit PHP neer. Vangt ook (sterk) geobfusceerde backdoors die geen inhoudspatroon raken.
+            $alGemeld = array_column($backdoorVondsten, 'bestandspad');
+            foreach ($tussenItems as $tussenItem) {
+                $tussenBestand = $tussenPad . '/' . $tussenItem;
+                if ($tussenItem === '.' || $tussenItem === '..' || !is_file($tussenBestand)
+                    || !isPhpUitvoerbareExtensie($tussenItem) || in_array($tussenBestand, $alGemeld, true)) {
+                    continue;
+                }
+                $backdoorVondsten[] = [
+                    'naam' => $tussenBestand,
+                    'reden' => 'PHP-bestand buiten de website-root, in een map van het hostingaccount ("' . $tussenPad . '") - de '
+                        . 'hostingpartij en Joomla zetten daar geen PHP neer; vrijwel zeker een achtergelaten backdoor, VERDACHT',
+                    'risico' => 80,
+                    'bestandspad' => $tussenBestand,
+                    'gewijzigd' => date('Y-m-d H:i', @filemtime($tussenBestand) ?: time()),
+                    'grootte' => (int) @filesize($tussenBestand),
+                ];
+            }
+        }
+    }
+
     $aantalNaExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
     $extraScanMelding = "Extra map \"$extraScanRootAbsoluut\" meegescand ($extraScanNiveauGebruikt niveau(s) boven de website-root, automatisch bepaald: "
         . ($aantalNaExtraScan - $aantalVoorExtraScan) . " extra vondst(en) daar gevonden, "
@@ -5485,6 +5675,13 @@ if (is_file($adminDefines)) {
 // Meldingen over hetzelfde bestand (inhoudspatroon, cloaking, kernintegriteit) tot één vondst samenvoegen.
 voegDubbeleVondstenSamen($backdoorVondsten, $rootLevelUnknown);
 
+// Elke vondst over een los bestand een inhoud-vingerafdruk meegeven, zodat de monitor een ongewijzigd bestand
+// herkent als ongewijzigd - ook als alleen de wijzigingsdatum is versprongen. Zie voegInhoudVingerafdrukkenToe().
+$aantalVingerafdrukken = 0;
+voegInhoudVingerafdrukkenToe($backdoorVondsten, $aantalVingerafdrukken);
+voegInhoudVingerafdrukkenToe($htaccessVondsten, $aantalVingerafdrukken);
+voegInhoudVingerafdrukkenToe($rootLevelUnknown, $aantalVingerafdrukken);
+
 // Database-gebaseerde checks (verdachte Super Users, ontmaskeringsteksten in
 // templatestijlen) - gebruikt configuration.php voor een eigen, alleen-lezen
 // databaseverbinding. Wordt netjes overgeslagen als dat om wat voor reden
@@ -5524,6 +5721,9 @@ if (!empty($backdoorVondsten)) {
         echo "   Reden: {$v['reden']}\n";
         echo "   Grootte: {$v['grootte']} bytes\n";
         echo "   Gewijzigd: {$v['gewijzigd']}\n";
+        if (!empty($v['inhoud_hash'])) {
+            echo "   Inhoud-vingerafdruk: {$v['inhoud_hash']}\n";
+        }
         echo "   [VERWIJDEREN!]\n\n";
     }
 } else {
@@ -5538,6 +5738,9 @@ if (!empty($htaccessVondsten)) {
         echo "   Reden: {$v['reden']}\n";
         echo "   Grootte: {$v['grootte']} bytes\n";
         echo "   Gewijzigd: {$v['gewijzigd']}\n";
+        if (!empty($v['inhoud_hash'])) {
+            echo "   Inhoud-vingerafdruk: {$v['inhoud_hash']}\n";
+        }
         echo "   [CONTROLEREN / VERWIJDEREN!]\n\n";
     }
 } else {
@@ -5565,6 +5768,9 @@ if (!empty($rootLevelUnknown)) {
             $grootte = isset($item['grootte']) ? ' (' . number_format($item['grootte']) . ' bytes)' : '';
             echo "  ⚠️  [file] " . $item['naam'] . "{$grootte}\n";
             echo "       Gewijzigd: {$item['gewijzigd']}\n";
+            if (!empty($item['inhoud_hash'])) {
+                echo "       Inhoud-vingerafdruk: {$item['inhoud_hash']}\n";
+            }
         }
         // De reden meeprinten: zonder dit leek bv. een rechtenafwijking op een bestand dat al als "onbekend item"
         // in de lijst stond op een dubbele vermelding van hetzelfde bestand.

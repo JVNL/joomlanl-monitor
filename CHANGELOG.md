@@ -1,5 +1,47 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.31 - 2026-10-07
+
+### Beveiligingsrapport: een vertrouwd bestand wordt herkend aan zijn inhoud, niet aan zijn wijzigingsdatum (`scan_template.php`, `ontvang_scan.php`, `verdacht_functies.php`)
+Een bestand dat als vertrouwd was gemarkeerd, verscheen bij een volgende scan soms opnieuw als "nieuw verdacht", en kwam daardoor ook steeds terug in de e-mailmelding. Oorzaak: de monitor herkende een bestand aan type, pad en wijzigingsdatum. Sommige programma's schrijven hun eigen bestanden regelmatig opnieuw weg met exact dezelfde inhoud; de datum verspringt dan telkens, terwijl er niets is veranderd.
+
+- **Het scanscript stuurt bij elke vondst over een los bestand een vingerafdruk van de inhoud mee** (de eerste 32 tekens van de sha256). Dat gebeurt op één centrale plek, vlak voor het versturen (`voegInhoudVingerafdrukkenToe()`), en geldt dus voor alle soorten vondsten: er is geen lijst van bestandsnamen, mappen of programma's.
+- **De monitor herkent zo'n bestand voortaan aan type, pad en inhoud** (`berekenVondstHash()`). Opnieuw weggeschreven met dezelfde inhoud: geen nieuwe melding. Inhoud gewijzigd: wel een nieuwe melding, ook als de wijzigingsdatum daarbij is teruggezet. Dat laatste ging voorheen ongemerkt voorbij.
+- De kolom "Gewijzigd" blijft de actuele datum tonen, ter informatie.
+- **Terugval op de wijzigingsdatum, zoals voorheen,** als er geen vingerafdruk is: bij een site waar nog een ouder scanscript draait, bij een bestand dat niet leesbaar is en bij een bestand groter dan 16 MB (bijvoorbeeld een back-uparchief). Voor mappen en verzamelmeldingen verandert er niets: daar telde de datum al niet mee.
+- **Bestaand vertrouwen blijft behouden.** Bij de eerste scan met het bijgewerkte scanscript zet de monitor het vertrouwen over naar de nieuwe herkenning, voor elk bestand dat op dat moment ook volgens de oude methode nog vertrouwd was (`zetVertrouwenOverOpInhoud()`). Er verschijnt dus geen golf van oude meldingen. Het antwoord van de monitor onder "=== MONITOR ===" meldt hoeveel bestanden zijn overgezet.
+- Een bestand waarvan de datum sinds het vertrouwen al was versprongen, wordt bewust niet automatisch overgezet: daarvan is niet na te gaan of de inhoud nog dezelfde is. Dat verschijnt nog één keer en blijft na "Vertrouwen" weg.
+- De ruwe scanuitvoer toont per bestand de regel "Inhoud-vingerafdruk", zodat twee scans eenvoudig naast elkaar te leggen zijn.
+- De vingerafdruk staat achteraan de opgeslagen regel van de vondst (`[inhoud=...]`); er is geen wijziging in de database nodig. Het maken en teruglezen van die regel loopt via `maakVondstRegel()` en `parseVerdachtDetails()`, ook na een beheeractie (Quarantaine, Blokkeer, Verwijder).
+
+### Beveiligingsrapport: bestandsweergave sluit ook na "Vertrouwen" (`beveiliging.php`)
+- Stond een bestand open via "Bekijk" en klikte je daarna op "Vertrouwen", dan verdween de regel uit de lijst maar bleef de inhoud van het bestand in beeld staan. De weergave sluit nu ook bij "Vertrouwen" en "Niet meer vertrouwen", per regel en via de bulkbalk. Bij Quarantaine, Blokkeer en Verwijder was dat al zo.
+- Bij "Rechten herstellen" blijft de weergave bewust open: de vondst blijft staan en moet meestal nog worden beoordeeld.
+- Klik je op een actieknop terwijl de inhoud nog wordt geladen, dan verschijnt die inhoud daarna niet alsnog.
+- Bugfix: na het vertrouwen van het laatste item bleef een lege tabel met alleen kolomkoppen staan in plaats van de melding dat alle items vertrouwd zijn. De pagina keek daarvoor naar de eerste tabel op de pagina (het Super Users-overzicht) in plaats van naar de lijst met vondsten.
+
+### Helppagina (`help.php`)
+- Hoofdstuk 9: de uitleg over "Vertrouwen" beschrijft nu de knop (in plaats van een vinkje) en het vergelijken op inhoud, met de twee uitzonderingen (mappen en niet-vergelijkbare bestanden).
+
+### Scanscript: losse bestanden tussen accountroot en website-root (`scan_template.php`)
+Bij een indeling als `domains/<domein>/public_html` (DirectAdmin) sloeg het scannen boven de root de complete map `domains` over, omdat daarin de website zelf staat. Losse bestanden in `domains/` en in de domeinmap zelf, één niveau boven `public_html`, werden daardoor nooit bekeken. Juist daar stonden een backdoor en een kwaadaardige `.htaccess`.
+
+- **Elk tussenliggend niveau wordt nu apart gescand**, zonder de route naar de website zelf. In `domains/` alleen de losse bestanden (de submappen zijn andere sites met een eigen monitor-item); in de domeinmap alles behalve `public_html` en de standaard-uitsluitlijst.
+- **Elk PHP-bestand op zo'n tussenniveau wordt gemeld** (risico 80), ongeacht inhoud: de hostingpartij en Joomla zetten daar nooit PHP neer.
+- Geen rechtencontrole op deze niveaus (mappen als `stats`/`awstats` hebben eigen rechten van het hostingpaneel).
+
+### Scanscript: nieuw patroon voor achterdeuren met een tekentabel (`scan_template.php`)
+De backdoor die op zo'n tussenniveau stond, werd ook op inhoud door geen enkel patroon herkend, dus ook niet als hij binnen de website had gestaan. Alle gevaarlijke functienamen (`create_function`, `base64_decode`, `file_get_contents`, `filter_input` ...) staan er alleen als getallenreeksen in, die via een zelfgebouwde tekentabel worden vertaald; de code is opgeknipt met tientallen `goto`-sprongen.
+
+- **PATROON 29** (`detecteerTekentabelObfuscatie()`): `eval()` + minstens 5 `goto`-sprongen + een functienaam opgebouwd uit losse ge-escapete tekens (`"\x72" . "\141" . ...`) en/of een tekentabel van `~` tot spatie. Gemeld als zekere achterdeur.
+- Getest tegen een schoon Joomla 5.4-pakket (6.144 PHP-bestanden, inclusief vendor-libraries): geen treffers.
+
+### Scanscript: back-ups op een publiek bereikbare plek (`scan_template.php`)
+De `images/`-regel uit 1.30 sloeg aan op een Akeeba-backuplog in `images/`: de uitvoermap van Akeeba Backup stond daar, en daarmee ook de complete back-uparchieven, rechtstreeks te downloaden.
+
+- **Databestanden met een `die()`-kop in `images/`** (zoals Akeeba-logs) worden niet overgeslagen, maar met een eigen melding gemeld (risico 45): zelf geen achterdeur, wel een teken dat er een back-up- of logmap op een publieke plek staat.
+- **Nieuw: back-uparchieven en databasedumps binnen de website-root** (`.jpa`, `.jps`, `.j01` enz., `.sql`, `.sql.gz`, `.sql.zip`, `.sql.bz2`) worden gemeld (risico 70), behalve in de afgeschermde standaardmap van Akeeba Backup. Meegeleverde `.sql`-installatiebestanden van Joomla en extensies (in een map `sql`, `installation` of de vendor-map) tellen niet mee; tegen een schoon Joomla 5.4-pakket: 0 meldingen.
+
 ## 1.30 - 2026-10-06
 
 ### Scanscript: PHP in de afbeeldingsmap en nummermappen (`scan_template.php`)

@@ -62,19 +62,75 @@ function risicoLabel(int $score): array
 }
 
 /**
+ * Een inhoud-vingerafdruk is de (ingekorte) sha256 van de bestandsinhoud,
+ * zoals het scanscript die per vondst meestuurt: 32 hexadecimale tekens.
+ * Alles wat daar niet precies aan voldoet, wordt behandeld als "geen
+ * vingerafdruk bekend".
+ */
+function isGeldigeInhoudVingerafdruk($waarde): bool
+{
+    return is_string($waarde) && preg_match('/^[a-f0-9]{32}$/', $waarde) === 1;
+}
+
+/**
+ * Bepaalt de sleutel waaraan een vondst bij een volgende scan wordt herkend
+ * (en waarop "Vertrouwen" wordt vastgelegd). Eén plek voor deze regel, zodat
+ * het beveiligingsrapport, de monitorpagina, het klantrapport, de e-mail en
+ * het verwerken van een scan gegarandeerd hetzelfde antwoord geven.
+ *
+ *  - MAP en CLUSTER: alleen type + naam. De datum van een map verandert al
+ *    zodra er een bestand in wordt aangemaakt of hernoemd; bij een cluster is
+ *    de datum het moment van de scan zelf.
+ *  - BESTAND MET inhoud-vingerafdruk: type + naam + inhoud. De wijzigingsdatum
+ *    telt dan NIET mee: een bestand dat opnieuw is weggeschreven met exact
+ *    dezelfde inhoud is niet gewijzigd, en hoort dus ook niet opnieuw gemeld
+ *    te worden. Verandert de inhoud, dan verandert de sleutel en verschijnt
+ *    het bestand weer als nieuw - ook als de datum daarbij gelijk is gebleven.
+ *  - BESTAND ZONDER vingerafdruk (ouder scanscript, bestand niet leesbaar of
+ *    te groot om te hashen): type + naam + wijzigingsdatum, zoals voorheen.
+ */
+function berekenVondstHash(string $type, string $naam, string $gewijzigd, ?string $inhoud = null): string
+{
+    if (in_array($type, ['map', 'cluster'], true)) {
+        return md5($type . '|' . $naam);
+    }
+
+    if (isGeldigeInhoudVingerafdruk($inhoud)) {
+        return md5($type . '|' . $naam . '|inhoud:' . $inhoud);
+    }
+
+    return md5($type . '|' . $naam . '|' . $gewijzigd);
+}
+
+/**
+ * Bouwt één regel voor de kolom verdacht_details. De tegenhanger van
+ * parseVerdachtDetails(): wat hier wordt weggeschreven, leest die functie
+ * weer terug. "[inhoud=...]" komt er alleen bij als er een geldige
+ * vingerafdruk is.
+ */
+function maakVondstRegel(string $type, string $naam, string $gewijzigd, string $reden, int $risico, ?string $inhoud = null): string
+{
+    $regel = "[{$type}] {$naam} ({$gewijzigd}) - {$reden} [risico={$risico}]";
+
+    if (isGeldigeInhoudVingerafdruk($inhoud)) {
+        $regel .= " [inhoud={$inhoud}]";
+    }
+
+    return $regel;
+}
+
+/**
  * Parseert de ruwe verdacht_details-tekst (regels in het formaat
- * "[type] naam (gewijzigd) - reden [risico=N]") naar een array van items.
- * Elk item krijgt een stabiele hash op basis van type + naam + gewijzigd,
+ * "[type] naam (gewijzigd) - reden [risico=N] [inhoud=H]") naar een array
+ * van items. Elk item krijgt een stabiele hash (zie berekenVondstHash()),
  * zodat we hetzelfde item bij een volgende scan kunnen herkennen.
  *
- * Het "[risico=N]"-stukje aan het einde is optioneel, voor achterwaartse
- * compatibiliteit met scanresultaten van vóór de risicoscore-functionaliteit -
- * ontbreekt het, dan wordt het risico alsnog berekend uit de reden-tekst.
- *
- * Let op: als het wijzigingstijdstip van een bestand verandert (het
- * bestand is dus opnieuw aangepast), krijgt het een NIEUWE hash en
- * wordt het dus terecht weer als (nieuw) verdacht getoond, ook al was
- * de oude versie ooit vertrouwd.
+ * De stukjes "[risico=N]" en "[inhoud=H]" aan het einde zijn allebei
+ * optioneel, voor achterwaartse compatibiliteit met al opgeslagen
+ * scanresultaten en met sites waar nog een ouder scanscript draait:
+ *  - ontbreekt het risico, dan wordt het berekend uit de reden-tekst;
+ *  - ontbreekt de inhoud-vingerafdruk, dan telt de wijzigingsdatum mee in de
+ *    hash, zoals voorheen.
  */
 function parseVerdachtDetails(?string $details): array
 {
@@ -93,12 +149,13 @@ function parseVerdachtDetails(?string $details): array
             continue;
         }
 
-        if (preg_match('/^\[(.+?)\]\s+(.+?)\s+\((.*?)\)\s+-\s+(.*?)(?:\s+\[risico=(\d+)\])?$/u', $regel, $m)) {
+        if (preg_match('/^\[(.+?)\]\s+(.+?)\s+\((.*?)\)\s+-\s+(.*?)(?:\s+\[risico=(\d+)\])?(?:\s+\[inhoud=([a-f0-9]{32})\])?$/u', $regel, $m)) {
             $type      = $m[1];
             $naam      = $m[2];
             $gewijzigd = $m[3];
             $reden     = $m[4];
             $risico    = isset($m[5]) && $m[5] !== '' ? (int) $m[5] : bepaalRisico($reden);
+            $inhoud    = isset($m[6]) && $m[6] !== '' ? $m[6] : null;
         } else {
             // Onbekend formaat: toon de ruwe regel toch, zodat er niets verloren gaat.
             $type      = '-';
@@ -106,6 +163,7 @@ function parseVerdachtDetails(?string $details): array
             $gewijzigd = '-';
             $reden     = '-';
             $risico    = 50;
+            $inhoud    = null;
         }
 
         // Bij een MAP en bij een CLUSTER (verzamelmelding over meerdere
@@ -125,12 +183,12 @@ function parseVerdachtDetails(?string $details): array
         //    clustermelding na het klikken op "Vertrouwen" bij de
         //    eerstvolgende scan alsnog weer als nieuw verscheen - ontdekt
         //    en gemeld in augustus 2026.
-        // Bij een BESTAND blijft de wijzigingsdatum wel meetellen -
-        // verandert de inhoud van een bestand dat je eerder vertrouwde, dan
-        // is dat wél terecht een reden om opnieuw te waarschuwen.
-        $hash = in_array($type, ['map', 'cluster'], true)
-            ? md5($type . '|' . $naam)
-            : md5($type . '|' . $naam . '|' . $gewijzigd);
+        // Bij een BESTAND telt de INHOUD: verandert die bij een bestand dat
+        // je eerder vertrouwde, dan is dat wél terecht een reden om opnieuw
+        // te waarschuwen. Alleen als het scanscript geen inhoud-vingerafdruk
+        // kon meesturen, valt dit terug op de wijzigingsdatum - zie
+        // berekenVondstHash() voor de volledige regel.
+        $hash = berekenVondstHash($type, $naam, $gewijzigd, $inhoud);
 
         $items[] = [
             'hash'      => $hash,
@@ -139,6 +197,7 @@ function parseVerdachtDetails(?string $details): array
             'gewijzigd' => $gewijzigd,
             'reden'     => $reden,
             'risico'    => $risico,
+            'inhoud'    => $inhoud,
         ];
     }
 
@@ -169,7 +228,10 @@ function verwijderVondstUitOpslag(PDO $pdo, int $siteId, string $naam): void
 
     $nieuweRegels = [];
     foreach ($overgebleven as $item) {
-        $nieuweRegels[] = "[{$item['type']}] {$item['naam']} ({$item['gewijzigd']}) - {$item['reden']} [risico={$item['risico']}]";
+        // Via maakVondstRegel(), zodat de inhoud-vingerafdruk van de overgebleven
+        // vondsten behouden blijft - anders zouden die na deze actie ineens een
+        // andere hash krijgen en weer als "nieuw" verschijnen.
+        $nieuweRegels[] = maakVondstRegel($item['type'], $item['naam'], $item['gewijzigd'], $item['reden'], (int) $item['risico'], $item['inhoud'] ?? null);
     }
 
     $update = $pdo->prepare("UPDATE sites SET verdacht_details = ?, verdacht_aantal = ? WHERE id = ?");
@@ -206,4 +268,62 @@ function haalAlleVertrouwdeHashes(PDO $pdo): array
     }
 
     return $resultaat;
+}
+
+/**
+ * Zet bestaand vertrouwen eenmalig over van de oude sleutel (met de
+ * wijzigingsdatum erin) naar de nieuwe sleutel (met de inhoud erin), voor
+ * elke vondst waarvan het scanscript nu een inhoud-vingerafdruk meestuurt.
+ *
+ * Zonder dit zou na het bijwerken van het scanscript ELK eerder vertrouwd
+ * bestand, op elke site, één keer opnieuw als "nieuw" verschijnen - de
+ * sleutel verandert immers van vorm, ook al is er aan het bestand niets
+ * veranderd.
+ *
+ * Wanneer is overzetten terecht? Alleen als de vondst op dit moment, met de
+ * wijzigingsdatum van nu, onder de OUDE sleutel vertrouwd is. Dat is precies
+ * de situatie waarin de monitor het bestand vóór deze wijziging ook al als
+ * vertrouwd zou hebben getoond - er wordt dus niets vertrouwd dat eerder
+ * niet vertrouwd was. Een bestand waarvan de datum sinds het vertrouwen is
+ * veranderd, wordt NIET overgezet: daarvan is niet meer na te gaan of de
+ * inhoud nog dezelfde is, dus dat moet één keer opnieuw worden beoordeeld.
+ *
+ * De oude rij wordt hierbij VERPLAATST (niet gekopieerd): vanaf dat moment
+ * is het vertrouwen aan de inhoud gekoppeld en is er geen weg terug meer
+ * naar "zelfde datum is genoeg".
+ *
+ * @param array $items Uitvoer van parseVerdachtDetails() voor deze site.
+ * @return int Aantal overgezette vondsten.
+ */
+function zetVertrouwenOverOpInhoud(PDO $pdo, int $siteId, array $items): int
+{
+    $vertrouwd = haalVertrouwdeHashes($pdo, $siteId);
+    if (empty($vertrouwd)) {
+        return 0;
+    }
+
+    $verplaatsStmt = $pdo->prepare("UPDATE verdacht_vertrouwd SET item_hash = ? WHERE site_id = ? AND item_hash = ?");
+    $aantal = 0;
+
+    foreach ($items as $item) {
+        if (!isGeldigeInhoudVingerafdruk($item['inhoud'] ?? null)) {
+            continue; // geen vingerafdruk: deze vondst gebruikt de oude sleutel nog gewoon
+        }
+        if (isset($vertrouwd[$item['hash']])) {
+            continue; // al vertrouwd op inhoud
+        }
+
+        $oudeHash = berekenVondstHash($item['type'], $item['naam'], $item['gewijzigd'], null);
+        if ($oudeHash === $item['hash'] || !isset($vertrouwd[$oudeHash])) {
+            continue;
+        }
+
+        $verplaatsStmt->execute([$item['hash'], $siteId, $oudeHash]);
+
+        unset($vertrouwd[$oudeHash]);
+        $vertrouwd[$item['hash']] = true;
+        $aantal++;
+    }
+
+    return $aantal;
 }

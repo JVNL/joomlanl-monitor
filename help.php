@@ -626,9 +626,13 @@ th {
 <section id="beveiliging">
     <h2>9. Het beveiligingsrapport gebruiken</h2>
     <p>Klik in de kolom "Beveiliging" op de status van een site om het volledige rapport te zien: alle gevonden verdachte bestanden/mappen, met type, pad, wijzigingsdatum en reden.</p>
-    <p>Weet je zeker dat een gevonden item legitiem is (bijv. een bekende extensie-map die toevallig als "onbekend" wordt gezien)? Vink dan het bijbehorende vinkje in de kolom "Vertrouwd" aan. Dat item verdwijnt dan uit de standaardweergave bij een volgende scan. Wil je alles (ook vertrouwde items) alsnog zien, klik dan op "Toon ook de vertrouwde items".</p>
+    <p>Weet je zeker dat een gevonden item legitiem is (bijv. een bekende extensie-map die toevallig als "onbekend" wordt gezien)? Klik dan op de knop <strong>"✅ Vertrouwen"</strong> achter dat item. Het verdwijnt dan meteen uit de standaardweergave en telt niet meer mee in de tellers en in de e-mailmelding. Wil je alles (ook vertrouwde items) alsnog zien, klik dan op "Toon ook de vertrouwde items".</p>
     <div class="tip">
-        💡 Verandert een eerder vertrouwd bestand later opnieuw (nieuwe wijzigingsdatum)? Dan verschijnt het vanzelf weer als "nieuw verdacht" - een eenmaal vertrouwd bestand blijft dus niet blind vertrouwd als het later opnieuw wordt aangepast.
+        💡 Vertrouwen geldt voor precies de <strong>inhoud</strong> die een bestand op dat moment heeft. Verandert die inhoud later, dan verschijnt het bestand vanzelf weer als "nieuw verdacht" - ook als de wijzigingsdatum daarbij gelijk is gebleven. Een eenmaal vertrouwd bestand blijft dus niet blind vertrouwd als het later wordt aangepast.
+    </div>
+    <p>Andersom leidt alleen een nieuwe wijzigingsdatum niet tot een nieuwe melding. Sommige programma's schrijven hun eigen bestanden regelmatig opnieuw weg zonder er iets aan te veranderen; de datum verspringt dan telkens, maar het bestand is hetzelfde gebleven. De kolom "Gewijzigd" toont de actuele datum wel, ter informatie.</p>
+    <div class="tip">
+        💡 Twee uitzonderingen: bij een <strong>map</strong> telt alleen de naam (de datum van een map verandert al zodra er een bestand in wordt aangemaakt of hernoemd), en bij een bestand waarvan het scanscript de inhoud niet kan vergelijken (niet leesbaar, of erg groot, zoals een back-uparchief) telt de wijzigingsdatum.
     </div>
 
     <h3>Risicoscore</h3>
@@ -691,7 +695,7 @@ th {
     <div class="stap"><strong>📦 Quarantaine</strong> - verplaatst het bestand naar een afgeschermde map op de site zelf (<code>_scan_beheer/quarantaine/</code>, met een eigen <code>.htaccess</code> die de hele map van het web afschermt) en zet de rechten op alleen-lezen. Volledig herstelbaar.</div>
     <div class="stap"><strong>🚫 Blokkeer</strong> - hernoemt het bestand ter plekke (bijv. <code>iets.php.BLOCKED_20260713_143022_a1b2c3</code>) en zet het op alleen-lezen. Blijft op zijn oorspronkelijke plek staan, maar kan niet meer worden uitgevoerd of aangeroepen. Volledig herstelbaar.</div>
     <div class="stap"><strong>🗑️ Verwijder</strong> - verplaatst het bestand naar een prullenbak op de site (ook afgeschermd), die na <strong>7 dagen</strong> automatisch definitief wordt geleegd. Tot die tijd nog gewoon herstelbaar.</div>
-    <p>Bij een geslaagde actie verdwijnt de vondst meteen uit de lijst hierboven (en uit de tellers) - je hoeft niet te wachten op de volgende volledige scan. Staat het bestand op dat moment open in het Bekijk-venster, dan wordt dat venster ook gesloten.</p>
+    <p>Bij een geslaagde actie verdwijnt de vondst meteen uit de lijst hierboven (en uit de tellers) - je hoeft niet te wachten op de volgende volledige scan. Staat het bestand op dat moment open in het Bekijk-venster, dan wordt dat venster ook gesloten. Dat geldt ook voor "Vertrouwen". Alleen bij "Rechten herstellen" blijft het venster open: de vondst blijft dan in de lijst staan en moet meestal nog worden beoordeeld.</p>
     <div class="tip">
         💡 Het rapport toont altijd de stand van de laatste <strong>ontvangen</strong> scan - de monitor kijkt zelf niet op de site. Verwijder je een bestand via FTP, dan blijft het dus in de lijst staan totdat er een nieuwe scan is aangekomen. Hetzelfde geldt voor een verzamelmelding (type cluster): die blijft staan, ook als je de losse bestanden al hebt verwerkt. Bovenaan het rapport staat bij "Laatste scan" van wanneer de getoonde gegevens zijn.
     </div>

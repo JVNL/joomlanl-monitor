@@ -3779,12 +3779,17 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
             if (strpos($volledigPad, $startMap . '/') === 0
                 && preg_match('/\.(?:jpa|jps|j\d{2}|sql|sql\.gz|sql\.zip|sql\.bz2)$/i', $item)) {
                 $relatiefBackup = str_replace('\\', '/', substr($volledigPad, strlen($startMap) + 1));
-                $inAkeebaStandaardmap = (bool) preg_match('#^administrator/components/com_akeeba(?:backup)?/backup/#i', $relatiefBackup);
-                // Extensies (en Joomla zelf: ~100 stuks in com_admin/sql/updates/) leveren .sql-installatiebestanden mee, altijd
-                // in een map "sql" of in de vendor-map; die zijn geen dump. Een Akeeba-archief (.jpa/.jps/.jNN) wordt altijd gemeld.
-                $isMeegeleverdSql = !preg_match('/\.(?:jpa|jps|j\d{2})$/i', $item)
-                    && preg_match('#(?:^|/)(?:sql|installation)/|^libraries/vendor/#i', $relatiefBackup);
-                if (!$inAkeebaStandaardmap && !$isMeegeleverdSql) {
+                // Akeeba levert zelf .jpa-bestanden mee (de herstelscripts in installers/: brs.jpa, brs-joomla.jpa ...) en
+                // zet zijn archieven standaard in backup/ - de hele componentmap telt dus niet mee.
+                $inAkeebaComponent = (bool) preg_match('#^administrator/components/com_akeeba(?:backup)?/#i', $relatiefBackup);
+                // .sql-bestanden alleen op plekken waar een dump terechtkomt: de website-root zelf, images/ en tmp/.
+                // Elders zijn het vrijwel altijd meegeleverde installatie- of testbestanden van Joomla of een extensie
+                // (com_admin/sql/updates, vendor/.../tests/, plugins/.../db/blank.sql ...). Akeeba-archieven
+                // (.jpa/.jps/.jNN) worden overal gemeld behalve in de Akeeba-componentmap.
+                $isAkeebaArchief = (bool) preg_match('/\.(?:jpa|jps|j\d{2})$/i', $item);
+                $sqlOpDumpplek = !$isAkeebaArchief
+                    && (strpos($relatiefBackup, '/') === false || preg_match('#^(?:images|tmp)/#i', $relatiefBackup));
+                if (!$inAkeebaComponent && ($isAkeebaArchief || $sqlOpDumpplek)) {
                     $backdoorVondsten[] = [
                         'naam' => '/' . $relatiefBackup,
                         'reden' => 'BACK-UPARCHIEF / DATABASEDUMP binnen de website-root, buiten de afgeschermde standaardmap van Akeeba Backup - '

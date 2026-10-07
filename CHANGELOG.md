@@ -40,7 +40,9 @@ De backdoor die op zo'n tussenniveau stond, werd ook op inhoud door geen enkel p
 De `images/`-regel uit 1.30 sloeg aan op een Akeeba-backuplog in `images/`: de uitvoermap van Akeeba Backup stond daar, en daarmee ook de complete back-uparchieven, rechtstreeks te downloaden.
 
 - **Databestanden met een `die()`-kop in `images/`** (zoals Akeeba-logs) worden niet overgeslagen, maar met een eigen melding gemeld (risico 45): zelf geen achterdeur, wel een teken dat er een back-up- of logmap op een publieke plek staat.
-- **Nieuw: back-uparchieven en databasedumps binnen de website-root** (`.jpa`, `.jps`, `.j01` enz., `.sql`, `.sql.gz`, `.sql.zip`, `.sql.bz2`) worden gemeld (risico 70), behalve in de afgeschermde standaardmap van Akeeba Backup. Meegeleverde `.sql`-installatiebestanden van Joomla en extensies (in een map `sql`, `installation` of de vendor-map) tellen niet mee; tegen een schoon Joomla 5.4-pakket: 0 meldingen.
+- **Nieuw: back-uparchieven en databasedumps binnen de website-root** worden gemeld (risico 70):
+  - Akeeba-archieven (`.jpa`, `.jps`, `.j01` enz.) overal, behalve in de componentmap van Akeeba Backup zelf (daar staan de afgeschermde standaarduitvoermap en de meegeleverde herstelscripts `brs*.jpa`).
+  - `.sql`, `.sql.gz`, `.sql.zip`, `.sql.bz2` alleen in de website-root zelf en in `images/`: elders zijn het meegeleverde installatie- of testbestanden van Joomla of een extensie (bv. `com_admin/sql/updates/`, testbestanden in een `vendor`-map, een lege `blank.sql`). Een eerste, ruimere versie gaf daardoor ruim honderd valse meldingen per site met Akeeba Backup.
 
 ## 1.30 - 2026-10-06
 

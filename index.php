@@ -897,6 +897,8 @@ foreach ($sites as $siteVoorTelling) {
     }
 
     $itemsVoorTelling = parseVerdachtDetails($siteVoorTelling['verdacht_details'] ?? '');
+    // "SCAN ONVOLLEDIG" is geen verdacht bestand, maar telt wel als aandachtspunt: de site is niet helemaal bekeken.
+    $scanOnvolledigVoorTelling = haalScanVoortgangUitItems($itemsVoorTelling) !== null;
     $siteVertrouwdVoorTelling = $alleVertrouwdeHashes[$siteVoorTelling['id']] ?? [];
     $vertrouwdAantalVoorTelling = 0;
     foreach ($itemsVoorTelling as $itemVoorTelling) {
@@ -908,7 +910,8 @@ foreach ($sites as $siteVoorTelling) {
     // meetellen - dat is een vergelijking met een officieel, ongewijzigd
     // pakket, dus een hard signaal, net als de reguliere verdachte-scan.
     $issueBeveiliging = (count($itemsVoorTelling) - $vertrouwdAantalVoorTelling) > 0
-        || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0;
+        || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0
+        || $scanOnvolledigVoorTelling;
 
     // Extensiebestand-afwijkingen (vergeleken met de MEERDERHEID van andere
     // sites) zijn een zachter "wijkt af"-signaal - geen vergelijking met een
@@ -1026,6 +1029,8 @@ foreach ($sites as $site) {
         $bestandenCel = "<td data-label=\"Bestandsafwijkingen\">-</td>";
     } else {
         $items = parseVerdachtDetails($site['verdacht_details'] ?? '');
+        // Melding "SCAN ONVOLLEDIG" eruit: die wordt hieronder als voortgang getoond, niet als "1 verdacht".
+        $scanVoortgang = haalScanVoortgangUitItems($items);
         $siteVertrouwd = $alleVertrouwdeHashes[$site['id']] ?? [];
 
         $totaalItems = count($items);
@@ -1045,7 +1050,7 @@ foreach ($sites as $site) {
         // vergelijking met het officiële, ongewijzigde Joomla-pakket, dus
         // een hard signaal, net als de reguliere verdachte-bestanden-scan.
         $kernAantal = (int) ($kernAfwijkingenPerSite[$site['id']] ?? 0);
-        $ernstBeveiliging = $verdachtWeergave + $kernAantal;
+        $ernstBeveiliging = $verdachtWeergave + $kernAantal + ($scanVoortgang !== null ? 1 : 0);
 
         // Extensie-bestand-afwijkingen (vergeleken met de MEERDERHEID van
         // andere sites, dus geen vergelijking met een officieel pakket)
@@ -1060,15 +1065,37 @@ foreach ($sites as $site) {
 
         $regels = [];
 
+        // Onvolledige scan: bovenaan, in plaats van "1 verdacht" (wat het niet is) en in plaats van "Schoon" (dat is
+        // nog niet vastgesteld zolang niet alles is bekeken). De link opent het rapport en zet daar meteen een
+        // vervolgscan in gang (?vervolg_scan=1, zie beveiliging.php); bestanden die al zijn gecontroleerd en niet zijn
+        // gewijzigd, slaat het scanscript daarbij over, dus die scan komt verder.
+        if ($scanVoortgang !== null) {
+            $voortgangTitel = 'De laatste scan heeft niet alle bestanden kunnen bekijken - klik om het rapport te openen en de scan te vervolgen';
+            $regels[] = "<a class='oranje' href='beveiliging.php?id=$siteId&amp;vervolg_scan=1' title='" . htmlspecialchars($voortgangTitel, ENT_QUOTES) . "'>⏳ "
+                . htmlspecialchars(scanVoortgangTekst($scanVoortgang)) . "</a>";
+        }
+
         if ($totaalItems === 0) {
-            $regels[] = "<a class='groen' href='beveiliging.php?id=$siteId'>🟢 Schoon</a>";
+            if ($scanVoortgang === null) {
+                $regels[] = "<a class='groen' href='beveiliging.php?id=$siteId'>🟢 Schoon</a>";
+            }
         } elseif ($verdachtWeergave === 0) {
             // Alles gevonden is als vertrouwd gemarkeerd -> als veilig tonen.
-            $regels[] = "<a class='groen' href='beveiliging.php?id=$siteId&toon_vertrouwd=1'>🟢 Schoon ($vertrouwdAantal vertrouwd)</a>";
+            // Normale weergave (vertrouwde items verborgen): "Schoon" hoort naar het gewone rapport te gaan. Wie de
+            // vertrouwde items wil zien, gebruikt daar de knop "Toon ook de vertrouwde items".
+            if ($scanVoortgang === null) {
+                $regels[] = "<a class='groen' href='beveiliging.php?id=$siteId'>🟢 Schoon ($vertrouwdAantal vertrouwd)</a>";
+            } else {
+                $regels[] = "<a class='vertrouwd-link' href='beveiliging.php?id=$siteId'>✅ $vertrouwdAantal vertrouwd</a>";
+            }
         } else {
             $regels[] = "<a class='rood' href='beveiliging.php?id=$siteId'>🔴 $verdachtWeergave verdacht</a>";
             if ($vertrouwdAantal > 0) {
-                $regels[] = "<a class='vertrouwd-link' href='beveiliging.php?id=$siteId&toon_vertrouwd=1'>✅ $vertrouwdAantal vertrouwd</a>";
+                // Ook deze link opent het rapport in de standaardweergave, met de vertrouwde items verborgen (sinds 1.33).
+                // Voorheen opende hij met ?toon_vertrouwd=1, en omdat dit de link is waarop je bij een site met een
+                // nieuwe vondst vaak klikt, stond het rapport dan steeds met alle vertrouwde items open. Wie ze wil
+                // zien, gebruikt op de pagina zelf de knop "Toon ook de vertrouwde items".
+                $regels[] = "<a class='vertrouwd-link' href='beveiliging.php?id=$siteId'>✅ $vertrouwdAantal vertrouwd</a>";
             }
         }
 

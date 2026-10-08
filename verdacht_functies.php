@@ -205,6 +205,71 @@ function parseVerdachtDetails(?string $details): array
 }
 
 /**
+ * Naam van de verzamelmelding die het scanscript stuurt als de bestandsscan zijn tijds- of aantalsgrens heeft gehaald
+ * (zie de afronding van scanRecursief() in scan_template.php).
+ */
+const SCAN_ONVOLLEDIG_NAAM = 'SCAN ONVOLLEDIG - scanbudget bereikt';
+
+/**
+ * Haalt de melding "SCAN ONVOLLEDIG" uit de lijst met vondsten en geeft de voortgang van de scan terug.
+ *
+ * Die melding is geen verdacht bestand, maar zegt dat de laatste scan niet alles heeft kunnen bekijken. Telde hij
+ * mee als vondst, dan stond er op de monitorpagina "1 verdacht" bij een site waar niets verdachts is gevonden, en kon
+ * hij met "Vertrouwen" worden weggeklikt terwijl de scan nog steeds onvolledig was. Daarom gaat hij er hier uit, op
+ * één plek, en tonen de monitorpagina, het beveiligingsrapport, het klantrapport en de e-mail hem als voortgang
+ * ("Scan afgerond voor N%"). De opgeslagen tekst zelf (verdacht_details) blijft ongewijzigd.
+ *
+ * Het percentage staat sinds 1.33 in de reden ("38% van de bestanden bekeken", of "hoogstens 38% ..." als ook het
+ * tellen van de rest is afgebroken). Een scanscript van vóór 1.33 stuurt de melding zonder percentage: dan is
+ * 'procent' null en tonen de pagina's alleen "scan onvolledig".
+ *
+ * @param array $items Uitvoer van parseVerdachtDetails(); de melding wordt hier uit verwijderd.
+ * @return array{procent: ?int, bovengrens: bool, reden: string, gewijzigd: string}|null null = scan was volledig
+ */
+function haalScanVoortgangUitItems(array &$items): ?array
+{
+    $voortgang = null;
+
+    foreach ($items as $sleutel => $item) {
+        if (($item['type'] ?? '') !== 'cluster' || ($item['naam'] ?? '') !== SCAN_ONVOLLEDIG_NAAM) {
+            continue;
+        }
+
+        $reden = (string) ($item['reden'] ?? '');
+        $procent = null;
+        $bovengrens = false;
+        if (preg_match('/(hoogstens )?(\d{1,3})% van de bestanden bekeken/u', $reden, $m)) {
+            $procent = min(99, (int) $m[2]);
+            $bovengrens = $m[1] !== '';
+        }
+
+        $voortgang = [
+            'procent' => $procent,
+            'bovengrens' => $bovengrens,
+            'reden' => $reden,
+            'gewijzigd' => (string) ($item['gewijzigd'] ?? ''),
+        ];
+        unset($items[$sleutel]);
+    }
+
+    $items = array_values($items);
+
+    return $voortgang;
+}
+
+/**
+ * Korte tekst voor de voortgang, bijvoorbeeld "Scan afgerond voor 38%" of "Scan afgerond voor hoogstens 38%".
+ */
+function scanVoortgangTekst(array $voortgang): string
+{
+    if ($voortgang['procent'] === null) {
+        return 'Scan onvolledig';
+    }
+
+    return 'Scan afgerond voor ' . ($voortgang['bovengrens'] ? 'hoogstens ' : '') . $voortgang['procent'] . '%';
+}
+
+/**
  * Verwijdert één specifieke vondst (op basis van het pad/naam) direct uit
  * de opgeslagen verdacht_details van een site, en werkt verdacht_aantal
  * bij. Wordt aangeroepen door site_beheer_actie.php na een geslaagde
@@ -326,4 +391,53 @@ function zetVertrouwenOverOpInhoud(PDO $pdo, int $siteId, array $items): int
     }
 
     return $aantal;
+}
+
+/**
+ * Voegt vondsten met precies dezelfde melding (type + risico + reden, en dezelfde vertrouwd-status) samen tot één
+ * groep, zodra die melding minstens $drempel keer voorkomt. Aanleiding: een zwaar besmette site met ruim 4.500
+ * identieke .htaccess-meldingen gaf een onwerkbare lijst en een klantrapport van ruim 500 pagina's.
+ *
+ * Geeft een lijst blokken terug, in de volgorde van de eerste vondst van elk blok:
+ *  - ['item' => $item]                                  voor een losse vondst;
+ *  - ['leden' => [$item, ...], 'eerste' => $item,
+ *     'van' => 'oudste datum', 'tot' => 'nieuwste datum'] voor een groep.
+ * De vondsten zelf blijven ongewijzigd; vertrouwen en beheeracties werken dus gewoon per bestand.
+ */
+function groepeerGelijkeVondsten(array $items, int $drempel = 5, array $vertrouwdHashes = []): array
+{
+    $sleutelVan = function (array $item) use ($vertrouwdHashes): string {
+        return strtolower((string) ($item['type'] ?? '')) . '|' . (int) ($item['risico'] ?? 0) . '|' . (string) ($item['reden'] ?? '')
+            . '|' . (isset($vertrouwdHashes[$item['hash'] ?? '']) ? 'v' : 'n');
+    };
+
+    $perSleutel = [];
+    foreach ($items as $item) {
+        $perSleutel[$sleutelVan($item)][] = $item;
+    }
+
+    $blokken = [];
+    $gehad = [];
+    foreach ($items as $item) {
+        $sleutel = $sleutelVan($item);
+        if (count($perSleutel[$sleutel]) < $drempel) {
+            $blokken[] = ['item' => $item];
+            continue;
+        }
+        if (isset($gehad[$sleutel])) {
+            continue;
+        }
+        $gehad[$sleutel] = true;
+        $datums = array_values(array_filter(array_map(fn($i) => (string) ($i['gewijzigd'] ?? ''), $perSleutel[$sleutel]),
+            fn($d) => $d !== '' && $d !== '-'));
+        sort($datums);
+        $blokken[] = [
+            'leden'  => $perSleutel[$sleutel],
+            'eerste' => $item,
+            'van'    => $datums[0] ?? '-',
+            'tot'    => $datums[count($datums) - 1] ?? '-',
+        ];
+    }
+
+    return $blokken;
 }

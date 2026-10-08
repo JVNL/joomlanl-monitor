@@ -120,6 +120,8 @@ foreach ($sites as $site) {
     // 5. Beveiliging (verdachte, niet-vertrouwde bestanden)
     if ($beveiligingAan) {
         $items         = parseVerdachtDetails($site['verdacht_details'] ?? '');
+        // "SCAN ONVOLLEDIG" niet als verdacht bestand tellen, maar als eigen regel melden.
+        $scanVoortgang = haalScanVoortgangUitItems($items);
         $vertrouwd     = $alleVertrouwdeHashes[$site['id']] ?? [];
         $nietVertrouwd = 0;
 
@@ -131,6 +133,9 @@ foreach ($sites as $site) {
 
         if ($nietVertrouwd > 0) {
             $regels[] = "Beveiliging - Verdachte bestand(en): $nietVertrouwd";
+        }
+        if ($scanVoortgang !== null) {
+            $regels[] = "Beveiliging - " . scanVoortgangTekst($scanVoortgang) . " (niet alle bestanden gecontroleerd)";
         }
     }
 

@@ -28,6 +28,11 @@ $domein      = $site['domein'];
 $laatsteScan = $site['verdacht_laatste_scan'];
 
 $alleItems       = parseVerdachtDetails($site['verdacht_details'] ?? '');
+// "SCAN ONVOLLEDIG" is geen vondst maar een voortgangsmelding: uit de lijst halen en hieronder als aparte balk tonen
+// (met de knop "Scan vervolgen"), zodat hij niet als verdacht item meetelt en ook niet kan worden "vertrouwd".
+$scanVoortgang   = haalScanVoortgangUitItems($alleItems);
+// Via de link "⏳ Scan afgerond voor N%" op de monitorpagina: meteen een vervolgscan starten (zie het script onderaan).
+$vervolgScanStarten = $scanVoortgang !== null && isset($_GET['vervolg_scan']) && $_GET['vervolg_scan'] === '1';
 $vertrouwdHashes = haalVertrouwdeHashes($pdo, $id);
 
 $totaalAantal    = count($alleItems);
@@ -604,6 +609,51 @@ header .knop {
     border-radius: 4px;
 }
 
+/* Balk "Onvolledige scan" (zie haalScanVoortgangUitItems()) - alleen themakleuren, werkt in licht en donker. */
+.scan-voortgang-blok {
+    margin-bottom: 15px;
+    padding: 12px 14px;
+    background: var(--thema-kader-bg);
+    color: var(--thema-tekst);
+    border: 1px solid var(--thema-geel);
+    border-left: 5px solid var(--thema-geel);
+    border-radius: 4px;
+}
+
+.scan-voortgang-kop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.scan-voortgang-kop strong {
+    color: var(--thema-geel);
+    font-size: 16px;
+}
+
+.scan-voortgang-spoor {
+    margin: 10px 0 8px;
+    height: 14px;
+    background: var(--thema-badge-bg);
+    border: 1px solid var(--thema-rand);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.scan-voortgang-vulling {
+    height: 100%;
+    background: var(--thema-geel);
+}
+
+/* Zelfde grootte als de andere uitlegteksten op deze pagina (.uitleg: 14px) - 12px was te klein om prettig te lezen. */
+.scan-voortgang-uitleg {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--thema-tekst);
+}
+
 #voortgang-buiten {
     display: none;
     margin-bottom: 15px;
@@ -860,6 +910,10 @@ header .knop {
 .btn-herstel    { background: #1f8a4c; }
 .btn-definitief { background: #c0392b; }
 
+/* Samengevoegde gelijke meldingen (groepeerGelijkeVondsten()) */
+tr.groep-lid.ingeklapt { display: none !important; }
+tr.groep-kop { background: var(--thema-kader-bg); }
+.groep-wissel { border: none; background: none; cursor: pointer; font-size: 13px; padding: 0 6px 0 0; color: inherit; }
 </style>
 <?php include 'responsive_stijlen.php'; ?>
 </head>
@@ -878,7 +932,7 @@ header .knop {
 
 <?php $ftpLink = bepaalFtpClientLink($site); ?>
 <div class="acties-boven" style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-    <button type="button" class="knop knop-geel" onclick="herscanDezeSite(this)">🔄 Herscan alleen deze website</button>
+    <button type="button" class="knop knop-geel" id="herscan-knop" onclick="herscanDezeSite(this)">🔄 Herscan alleen deze website</button>
     <?php if ($ftpLink['url'] !== null): ?>
     <a class="knop secundair" href="<?php echo htmlspecialchars($ftpLink['url']); ?>"
         <?php if ($ftpLink['gebruikersnaamKopieren'] !== null): ?>
@@ -899,6 +953,32 @@ header .knop {
 <div id="voortgang-buiten">
     <div id="voortgang-binnen">0%</div>
 </div>
+
+<?php if ($scanVoortgang !== null): ?>
+<?php
+    $voortgangProcent = $scanVoortgang['procent'];
+    $gestoptBij = preg_match('/gestopt bij "([^"]*)"/u', $scanVoortgang['reden'], $gestoptMatch) ? $gestoptMatch[1] : '';
+?>
+<div class="scan-voortgang-blok" id="scan-voortgang-blok">
+    <div class="scan-voortgang-kop">
+        <strong>⏳ Onvolledige scan - <?php echo htmlspecialchars(lcfirst(scanVoortgangTekst($scanVoortgang))); ?></strong>
+        <button type="button" class="knop knop-geel" id="vervolg-scan-knop" onclick="vervolgScan(this)">🔄 Scan vervolgen</button>
+    </div>
+    <?php if ($voortgangProcent !== null): ?>
+    <div class="scan-voortgang-spoor" title="<?php echo (int) $voortgangProcent; ?>% van de bestanden bekeken">
+        <div class="scan-voortgang-vulling" style="width: <?php echo (int) $voortgangProcent; ?>%;"></div>
+    </div>
+    <?php endif; ?>
+    <div class="scan-voortgang-uitleg">
+        De laatste scan heeft niet alle bestanden kunnen bekijken: de maximale scantijd of het maximale aantal bestanden was bereikt<?php
+        echo $gestoptBij !== '' ? ', bij <code>' . htmlspecialchars($gestoptBij) . '</code>' : ''; ?>. Wat daarna komt, is nog niet op
+        verdachte inhoud gecontroleerd. <strong>Deze site is pas volledig gecontroleerd als deze balk na een scan niet meer verschijnt.</strong>
+        Een vervolgscan slaat bestanden over die al zijn gecontroleerd en sindsdien niet zijn gewijzigd, en komt daardoor verder;
+        meestal zijn er een of twee nodig. Blijft het percentage gelijk, ruim dan onnodige bestanden op, of sluit grote mappen buiten
+        de website uit via de site-instellingen.
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="overzicht">
     <div>
@@ -997,7 +1077,12 @@ if (!empty($site['super_users_json'])) {
 <?php if ($totaalAantal === 0): ?>
 
     <div class="leeg">
+        <?php if ($scanVoortgang !== null): ?>
+        🟢 In het deel van de site dat de laatste scan heeft bekeken, zijn geen verdachte items gevonden. De rest is nog niet
+        gecontroleerd - zie de balk "Onvolledige scan" hierboven.
+        <?php else: ?>
         🟢 Er zijn geen verdachte items gevonden bij de laatste scan.
+        <?php endif; ?>
     </div>
 
 <?php elseif (empty($teTonenItems)): ?>
@@ -1044,11 +1129,35 @@ if (!empty($site['super_users_json'])) {
     <th>Reden</th>
     <th style="width: 130px;">Beheer</th>
 </tr>
-<?php foreach ($teTonenItems as $item): ?>
+<?php
+// Gelijke meldingen (5 of meer keer precies dezelfde reden) worden samengevoegd onder een klapbare kopregel met het
+// aantal; de losse vondsten staan er ingeklapt onder en houden hun eigen knoppen. Met het vinkje in de kopregel
+// selecteer je ze allemaal, waarna de knoppen in de balk bovenaan voor de hele groep werken.
+?>
+<?php foreach (groepeerGelijkeVondsten($teTonenItems, 5, $vertrouwdHashes) as $blokNr => $blok): ?>
+<?php $groepId = isset($blok['leden']) ? 'groep-' . $blokNr : null; ?>
+<?php if ($groepId !== null): ?>
+<?php $kopItem = $blok['eerste']; $groepAantal = count($blok['leden']); ?>
+<tr class="groep-kop" data-groep="<?php echo $groepId; ?>" data-rij-type="<?php echo htmlspecialchars(strtolower($kopItem['type'])); ?>">
+    <td data-label="" class="vinkje-kolom">
+        <input type="checkbox" class="vertrouwd-checkbox groep-checkbox" title="Alle bestanden in deze groep (de)selecteren" onclick="groepSelecteren(this, '<?php echo $groepId; ?>')">
+    </td>
+    <td data-label="Risico"><?php echo risicoBadgeHtml($kopItem['risico'] ?? 50); ?></td>
+    <td data-label="Type"><span class="type-badge <?php echo typeKlasse($kopItem['type']); ?>"><?php echo htmlspecialchars($kopItem['type']); ?></span></td>
+    <td data-label="Naam / pad">
+        <button type="button" class="groep-wissel" data-open="0" onclick="groepWissel(this, '<?php echo $groepId; ?>')">▶</button>
+        <strong><span class="groep-aantal"><?php echo number_format($groepAantal, 0, ',', '.'); ?></span> bestanden met dezelfde melding</strong>
+    </td>
+    <td data-label="Gewijzigd"><?php echo htmlspecialchars($blok['van'] === $blok['tot'] ? $blok['van'] : $blok['van'] . ' t/m ' . $blok['tot']); ?></td>
+    <td data-label="Reden"><?php echo htmlspecialchars($kopItem['reden']); ?></td>
+    <td data-label="Beheer"><div style="font-size: 11px; color: var(--thema-uitleg-tekst);">Vink deze regel aan en gebruik de knoppen in de balk bovenaan om alle bestanden in één keer te verwerken, of klap de groep open (▶) voor de losse bestanden.</div></td>
+</tr>
+<?php endif; ?>
+<?php foreach (isset($blok['leden']) ? $blok['leden'] : [$blok['item']] as $item): ?>
 <?php $isVertrouwd = isset($vertrouwdHashes[$item['hash']]); ?>
 <?php // Joomla's eigen ingangsbestanden: quarantaine/blokkeer/verwijder zou de hele site platleggen - vervangen door het origineel is de juiste weg. ?>
 <?php $isKernEntree = in_array('/' . ltrim(str_replace('\\', '/', $item['naam']), '/'), ['/index.php', '/administrator/index.php', '/api/index.php', '/includes/app.php'], true); ?>
-<tr class="<?php echo $isVertrouwd ? 'vertrouwd-rij' : ''; ?>" data-pad="<?php echo htmlspecialchars($item['naam']); ?>" data-rij-type="<?php echo htmlspecialchars(strtolower($item['type'])); ?>">
+<tr class="<?php echo trim(($isVertrouwd ? 'vertrouwd-rij' : '') . ($groepId !== null ? ' groep-lid ingeklapt' : '')); ?>"<?php echo $groepId !== null ? ' data-groep="' . $groepId . '"' : ''; ?> data-pad="<?php echo htmlspecialchars($item['naam']); ?>" data-rij-type="<?php echo htmlspecialchars(strtolower($item['type'])); ?>">
     <td data-label="" class="vinkje-kolom">
         <input
             type="checkbox"
@@ -1093,6 +1202,7 @@ if (!empty($site['super_users_json'])) {
         </div>
     </td>
 </tr>
+<?php endforeach; ?>
 <?php endforeach; ?>
 </table>
 
@@ -1256,6 +1366,11 @@ foreach ($gegroepeerdVertrouwd['los'] as $afwijking) {
 <script>
 const SITE_ID    = <?php echo (int)$id; ?>;
 const TOON_ALLES = <?php echo $toonAlles ? 'true' : 'false'; ?>;
+// Na "Herscan alleen deze website" altijd terug naar de standaardweergave (vertrouwde items verborgen), ook als de
+// pagina op dat moment met ?toon_vertrouwd=1 openstond - location.reload() hield die instelling vast.
+const RAPPORT_STANDAARD_URL = 'beveiliging.php?id=' + SITE_ID;
+// Geopend via "⏳ Scan afgerond voor N%" op de monitorpagina (?vervolg_scan=1): vervolgscan meteen starten.
+const VERVOLG_SCAN_STARTEN = <?php echo $vervolgScanStarten ? 'true' : 'false'; ?>;
 const TOTAAL     = <?php echo (int)$totaalAantal; ?>;
 const CSRF_TOKEN = <?php echo json_encode(haalCsrfToken()); ?>;
 
@@ -1370,8 +1485,38 @@ function wachtOpNieuwScanresultaat(basisTijd, maxSeconden, opVoortgang) {
     });
 }
 
+// Knop "Scan vervolgen" in de balk "Onvolledige scan": precies dezelfde herscan als de gele knop bovenaan (het
+// scanscript gaat vanzelf verder waar het bleef, zie het inhoudsgeheugen in scan_template.php). Beide knoppen gaan
+// uit zolang de scan loopt.
+function vervolgScan(knop) {
+    const herscanKnop = document.getElementById('herscan-knop');
+    herscanDezeSite(herscanKnop);
+    if (knop) {
+        // Volgt de gele knop: die gaat bij een fout weer aan (bij succes herlaadt de pagina).
+        knop.disabled = true;
+        const volg = setInterval(() => {
+            if (!herscanKnop.disabled) {
+                knop.disabled = false;
+                clearInterval(volg);
+            }
+        }, 1000);
+    }
+}
+
+if (VERVOLG_SCAN_STARTEN) {
+    // De parameter uit de adresbalk halen: anders start een handmatige verversing van de pagina opnieuw een scan.
+    try {
+        history.replaceState(null, '', location.pathname + '?id=' + SITE_ID);
+    } catch (e) {
+        // Geen ramp: na de scan gaat de pagina sowieso naar RAPPORT_STANDAARD_URL.
+    }
+    document.addEventListener('DOMContentLoaded', () => vervolgScan(document.getElementById('vervolg-scan-knop')));
+}
+
 function herscanDezeSite(knop) {
-    const MAX_WACHTTIJD_SECONDEN = 90;
+    // 120 in plaats van 90 seconden: bij een onvolledige scan telt het scanscript na de maximale scantijd (45 s) ook
+    // nog de resterende bestanden (maximaal 15 s), plus de extensiecontrole daarna.
+    const MAX_WACHTTIJD_SECONDEN = 120;
     knop.disabled = true;
 
     toonHerscanMelding('neutraal', '⏳ Scan wordt gestart voor deze website...');
@@ -1456,12 +1601,12 @@ function herscanDezeSite(knop) {
                             toonHerscanMelding('waarschuwing', '✅ Deze website is opnieuw gescand, maar ⚠️ de kernbestanden konden niet met het officiële Joomla-pakket worden vergeleken. '
                                 + eerste);
                             zetVoortgang(100, true);
-                            setTimeout(() => location.reload(), 9000);
+                            setTimeout(() => { location.href = RAPPORT_STANDAARD_URL; }, 9000);
                             return;
                         }
                         toonHerscanMelding('ok', '✅ Deze website is opnieuw gescand — pagina wordt herladen...');
                         zetVoortgang(100, true);
-                        setTimeout(() => location.reload(), 1200);
+                        setTimeout(() => { location.href = RAPPORT_STANDAARD_URL; }, 1200);
                     });
             });
         })
@@ -1472,7 +1617,41 @@ function herscanDezeSite(knop) {
         });
 }
 
+function groepWissel(knop, groepId) {
+    const open = knop.dataset.open === '1';
+    document.querySelectorAll('tr.groep-lid[data-groep="' + groepId + '"]').forEach(r => r.classList.toggle('ingeklapt', open));
+    knop.dataset.open = open ? '0' : '1';
+    knop.textContent = open ? '▶' : '▼';
+}
+
+function groepSelecteren(groepCb, groepId) {
+    document.querySelectorAll('tr.groep-lid[data-groep="' + groepId + '"]').forEach(r => {
+        const cb = r.querySelector('.bulk-checkbox');
+        if (cb && r.style.display !== 'none') {
+            cb.checked = groepCb.checked;
+        }
+    });
+    bulkKnoppenBijwerken();
+}
+
+// Aantal in de kopregel bijwerken nadat bestanden uit een groep zijn verwerkt; een lege groep verdwijnt.
+function groepTellersBijwerken() {
+    document.querySelectorAll('tr.groep-kop').forEach(kop => {
+        const aantal = document.querySelectorAll('tr.groep-lid[data-groep="' + kop.dataset.groep + '"]').length;
+        if (aantal === 0) {
+            kop.remove();
+        } else {
+            const el = kop.querySelector('.groep-aantal');
+            if (el) {
+                el.textContent = aantal.toLocaleString('nl-NL');
+            }
+        }
+    });
+}
+
 function updateTellers() {
+    // Rijen worden na een geslaagde actie met een korte vervaging verwijderd (300 ms) - daarna pas tellen.
+    setTimeout(groepTellersBijwerken, 350);
     const nieuwEl     = document.getElementById('teller-nieuw');
     const vertrouwdEl = document.getElementById('teller-vertrouwd');
     const actiesBlok  = document.getElementById('acties-boven-blok');

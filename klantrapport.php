@@ -52,6 +52,9 @@ $domein = $site['domein'];
 // ----------------------------------------------------------------------
 
 $alleItems       = parseVerdachtDetails($site['verdacht_details'] ?? '');
+// "SCAN ONVOLLEDIG" is geen bevinding over de site maar over de scan zelf: niet tussen de onbekende items, wel als
+// aparte regel in de samenvatting (en dan ook geen "geen aandachtspunten gevonden").
+$scanVoortgang   = haalScanVoortgangUitItems($alleItems);
 $vertrouwdHashes = haalVertrouwdeHashes($pdo, $id);
 
 $teRapporterenItems = array_values(array_filter(
@@ -307,24 +310,60 @@ foreach ($samenvattingRegels as [$aantal, $omschrijving]):
 </div>
 <?php endif; ?>
 
-<?php if ($totaalProblemen === 0): ?>
+<?php if ($scanVoortgang !== null): ?>
+<div class="samenvatting-regel">
+    <span class="bolletje-rood">●</span>
+    <span>
+        <?php if ($scanVoortgang['procent'] !== null): ?>
+        De laatste scan heeft <?php echo $scanVoortgang['bovengrens'] ? 'hoogstens ' : ''; ?><?php echo (int) $scanVoortgang['procent']; ?>% van de bestanden kunnen controleren;
+        <?php else: ?>
+        De laatste scan heeft niet alle bestanden kunnen controleren;
+        <?php endif; ?>
+        de rest wordt bij een volgende scan gecontroleerd. Dit rapport is dus nog niet volledig.
+    </span>
+</div>
+<?php endif; ?>
+
+<?php if ($totaalProblemen === 0 && $scanVoortgang === null): ?>
 <div class="alles-schoon">Er zijn bij de laatste scan geen aandachtspunten gevonden.</div>
+<?php elseif ($totaalProblemen === 0): ?>
+<div class="alles-schoon">In het deel van de website dat is gecontroleerd, zijn geen aandachtspunten gevonden.</div>
 <?php endif; ?>
 
 <?php
 function toonItems(array $items): void
 {
-    foreach ($items as $item) {
+    // Gelijke meldingen (5 of meer keer precies dezelfde reden) worden samengevat tot één blok met het aantal en een
+    // handvol voorbeelden - anders werd het rapport van een zwaar besmette site honderden pagina's lang.
+    $maxVoorbeelden = 10;
+    foreach (groepeerGelijkeVondsten($items) as $blok) {
+        $item = $blok['item'] ?? $blok['eerste'];
         [$risicoLabelTekst] = risicoLabel($item['risico']);
         $kleur = risicoKleur($item['risico']);
-        $regel = h($item['reden']);
-        if ($item['gewijzigd'] !== '-') {
-            $regel .= ' (gewijzigd: ' . h($item['gewijzigd']) . ')';
-        }
         echo '<div class="item-blok" style="border-left-color: ' . $kleur . ';">';
         echo '<span class="item-risico" style="color: ' . $kleur . ';">' . h($risicoLabelTekst . ' - ' . $item['risico']) . '</span>';
-        echo '<span class="item-naam">' . h($item['naam']) . '</span><br>';
-        echo '<span class="item-reden">' . $regel . '</span>';
+
+        if (isset($blok['item'])) {
+            $regel = h($item['reden']);
+            if ($item['gewijzigd'] !== '-') {
+                $regel .= ' (gewijzigd: ' . h($item['gewijzigd']) . ')';
+            }
+            echo '<span class="item-naam">' . h($item['naam']) . '</span><br>';
+            echo '<span class="item-reden">' . $regel . '</span>';
+        } else {
+            $aantal = count($blok['leden']);
+            $periode = $blok['van'] === $blok['tot'] ? $blok['van'] : $blok['van'] . ' t/m ' . $blok['tot'];
+            echo '<span class="item-naam">' . number_format($aantal, 0, ',', '.') . ' bestanden met precies dezelfde melding</span><br>';
+            echo '<span class="item-reden">' . h($item['reden']) . ($periode !== '-' ? ' (gewijzigd: ' . h($periode) . ')' : '') . '</span>';
+            echo '<div class="item-reden" style="margin-top: 4px;">Bijvoorbeeld:</div><ul class="item-reden" style="margin: 2px 0 0 18px; padding: 0;">';
+            foreach (array_slice($blok['leden'], 0, $maxVoorbeelden) as $lid) {
+                echo '<li>' . h($lid['naam']) . '</li>';
+            }
+            echo '</ul>';
+            if ($aantal > $maxVoorbeelden) {
+                echo '<div class="item-reden">... en nog ' . number_format($aantal - $maxVoorbeelden, 0, ',', '.') . ' andere.</div>';
+            }
+        }
         echo '</div>';
     }
 }

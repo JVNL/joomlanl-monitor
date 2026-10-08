@@ -1,5 +1,74 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.33 - 2026-10-08
+
+### Scanscript: inhoudsgeheugen, zodat een trage server de scan toch afmaakt (`scan_template.php`, `help.php`)
+Sinds 1.32 meldt het rapport "SCAN ONVOLLEDIG" als de bestandsscan zijn maximale tijd (45 seconden) haalt. Op trage servers gebeurde dat bij elke scan: in die tijd werden daar maar 17.000 tot 46.000 bestanden bekeken. Vóór 1.32 gebeurde hetzelfde, alleen zonder melding.
+
+- **Het scanscript onthoudt welke bestanden het op inhoud heeft gecontroleerd zonder iets te vinden**, met een handtekening uit `stat()`: grootte, mtime, ctime en inode. Is die bij de volgende scan gelijk, dan wordt het bestand niet opnieuw ingelezen. De scan komt zo elke keer verder, tot hij volledig is; daarna is een scan ook op een snelle server een stuk korter.
+- **Veilig tegen een teruggezette datum:** ctime kan een gewone gebruiker niet terugzetten; elke schrijfactie (ook `touch()`) zet hem op "nu". Getest met een backdoor in een eerder schoon bestand, met dezelfde grootte en de oude wijzigingsdatum: die wordt gewoon gemeld.
+- Alleen het inlezen van de inhoud wordt overgeslagen. Controles op pad en naam (PHP in `images/` of een map voor statische bestanden, back-uparchieven, willekeurige mapnamen), de `.htaccess`- en `php.ini`-controle en de rechtencontrole draaien elke scan.
+- Niet in het geheugen: bestanden met een melding (ook "ter info"), en `index.php` in een verdubbelde mapnaam (de uitkomst hangt daar af van wat er náást staat).
+- **Nieuwe versie van het scanscript = leeg geheugen**, dus na elke update wordt alles opnieuw ingelezen. Daarnaast wordt elk bestand minstens eens per 30 dagen opnieuw ingelezen.
+- Het geheugen staat in `_scan_beheer/inhoudsgeheugen_<code>.json`, met als sleutel een hash van het pad (geen leesbare bestandsnamen). Elk scanscript heeft een eigen bestand, dus twee monitors op dezelfde site zitten elkaar niet in de weg; een bestand dat 30 dagen niet is bijgewerkt, wordt opgeruimd. Lukt schrijven niet, dan werkt de scan zoals voorheen.
+- De ruwe scanuitvoer heeft een nieuwe regel "Inhoudsgeheugen" met het aantal overgeslagen en ingelezen bestanden, en hoeveel seconden het inlezen kostte.
+- De melding "SCAN ONVOLLEDIG" legt nu uit dat de volgende scan verder komt.
+- Helppagina, hoofdstuk 14: nieuw onderdeel over een onvolledige scan.
+
+### Onvolledige scan: percentage in plaats van "1 verdacht" (`scan_template.php`, `verdacht_functies.php`, `index.php`, `beveiliging.php`, `klantrapport.php`, `verstuur_notificatie_email.php`, `help.php`)
+De melding "SCAN ONVOLLEDIG" kwam binnen als gewone vondst. Op de monitorpagina stond daardoor "🔴 1 verdacht" bij een site waar niets verdachts was gevonden, en de melding kon met "Vertrouwen" worden weggeklikt terwijl de scan nog steeds onvolledig was.
+
+- **Scanscript:** is het scanbudget op, dan telt het script de resterende bestanden nog (alleen `scandir()`, geen inhoud lezen; maximaal 15 seconden, `telResterendItem()`). De melding noemt het percentage: "38% van de bestanden bekeken". Is ook het tellen niet klaar, dan wordt het "hoogstens 38%". Een onvolledige scan komt nooit als 100% in beeld. De ruwe scanuitvoer heeft een nieuwe regel "Voortgang bestandsscan" met de aantallen.
+- **Monitor:** `haalScanVoortgangUitItems()` (in `verdacht_functies.php`) haalt de melding op één plek uit de vondstenlijst. Hij telt nergens meer als verdacht item en is niet meer te vertrouwen. De opgeslagen scangegevens blijven ongewijzigd; er is geen databasewijziging.
+- **Monitorpagina, beveiligingskolom:** "⏳ Scan afgerond voor 38%" bovenaan, in plaats van "1 verdacht" en in plaats van "🟢 Schoon". Andere vondsten staan er gewoon onder. De site telt mee bij "Aandacht nodig - beveiliging".
+- **Beveiligingsrapport:** een balk "Onvolledige scan" met het percentage, een voortgangsbalk, de plek waar de scan stopte en de knop "Scan vervolgen". Via de link op de monitorpagina start de vervolgscan meteen (`?vervolg_scan=1`, daarna uit de adresbalk gehaald, zodat verversen niet opnieuw een scan start). Na de scan herlaadt de pagina met het nieuwe percentage, of zonder balk als de scan volledig was.
+- De wachttijd op het resultaat van een herscan gaat van 90 naar 120 seconden, voor het tellen bij een onvolledige scan.
+- **Klantrapport:** een aparte regel in de samenvatting ("De laatste scan heeft 38% van de bestanden kunnen controleren ..."), en geen "geen aandachtspunten gevonden" zolang de scan onvolledig is.
+- **E-mailmelding:** een eigen regel "Beveiliging - Scan afgerond voor 38%" in plaats van een verdacht bestand.
+- Een melding van een scanscript van vóór 1.33 heeft geen percentage; die verschijnt als "⏳ Scan onvolledig".
+
+### Beveiligingsrapport opent altijd met de vertrouwde items verborgen (`index.php`, `beveiliging.php`, `help.php`)
+- De link "✅ N vertrouwd" naast een verdacht-telling op de monitorpagina opende het rapport mét de vertrouwde items (`?toon_vertrouwd=1`). Omdat je bij een site met een nieuwe vondst vaak juist daar klikt, stond de knop dan op "Verberg vertrouwde items". Hij opent nu de gewone weergave; de knop "Toon ook de vertrouwde items" blijft op de pagina.
+- Na "Herscan alleen deze website" herlaadt de pagina nu in de gewone weergave, ook als de vertrouwde items op dat moment zichtbaar waren.
+
+### Scanscript: Akeeba Backup-archieven van de site zelf buiten de website-root herkend (`scan_template.php`, `help.php`)
+Een uitvoermap van Akeeba Backup in de accountroot (bijvoorbeeld `Akeeba-Backup` of `akeebabackup`) werd gemeld als "onbekend item in extra scanpad", en elk archief daarin met de rechten 666 als "afwijkende rechten". Elke nieuwe back-up heeft een nieuwe naam, dus dat kwam na elke back-up terug. De standaard-uitsluitlijst bevatte wel `akeeba-backup`, maar die vergelijking let op hoofdletters, en Akeeba gebruikt ook andere mapnamen.
+
+- **Een archief telt als back-up van deze site** (`isAkeebaBackupArchiefVanDezeSite()`) als de naam Akeeba's standaardpatroon volgt met de hostnaam van de site (`site-<host>-<JJJJMMDD>-<UUMMSS><tz>-<code>.jpa`, ook `.jps`, `.zip` en de delen `.j01`/`.z01` ...), als het bestand begint met de echte kop van dat formaat (`JPA`, `JPS` of de zip-kop; bij een gesplitst archief het eerste deel), en als het buiten de website-root staat.
+- Zo'n archief krijgt geen melding meer, ook niet om de rechten. Een map (`isAkeebaUitvoermapVanDezeSite()`) wordt niet meer als onbekend item gemeld als er minstens één herkend archief in staat en verder alleen Akeeba's eigen bestanden (`index.html`, `.htaccess`, `web.config`, logboeken met een `die()`-kop) en geen submappen. De rechtencontrole van de map zelf blijft.
+- **Blijft wél gemeld:** een bestand met de juiste naam maar zonder echte archiefkop, een archief met de naam van een andere site, een map waar iets anders tussen staat, en (zoals sinds 1.32) een back-uparchief binnen de website-root buiten de eigen map van Akeeba.
+- De ruwe scanuitvoer noemt bij "Extra scanpad" hoeveel archieven zijn herkend en in welke map.
+- Getest met een nagebootste accountindeling: echte en gesplitste archieven herkend; een bestand met de juiste naam maar PHP-inhoud, en een archief van een andere site, worden nog wel gemeld.
+
+### Beveiligingsrapport: tekst in de balk "Onvolledige scan" groter (`beveiliging.php`)
+- De uitleg in de balk was 12 pixels, kleiner dan de rest van de pagina. Nu 14 pixels, zoals de andere uitlegteksten; de kop 16 pixels.
+
+### Beveiligingsrapport en klantrapport: gelijke meldingen samengevoegd (`verdacht_functies.php`, `beveiliging.php`, `klantrapport.php`, `help.php`)
+Een zwaar besmette site met ruim 4.500 identieke `.htaccess`-meldingen gaf een onwerkbare lijst en een klantrapport van ruim 500 pagina's.
+
+- **Komt precies dezelfde melding vijf keer of vaker voor** (zelfde type, risico, reden en vertrouwd-status), dan staan die vondsten onder één kopregel met het aantal en de periode van de wijzigingsdatums (`groepeerGelijkeVondsten()`).
+- **Beveiligingsrapport:** de losse vondsten staan ingeklapt onder de kopregel (openklappen met ▶) en houden hun eigen knoppen. Het vinkje in de kopregel selecteert de hele groep; daarna werken de knoppen in de balk bovenaan voor alle bestanden tegelijk. Het aantal in de kopregel loopt mee terug na een actie; een lege groep verdwijnt.
+- **Klantrapport:** per groep het aantal, de melding en tien voorbeelden. De tellingen in de samenvatting blijven het werkelijke aantal vondsten.
+- Vertrouwen en beheeracties werken ongewijzigd per bestand.
+
+### Scanscript: site in een submap van de webroot (`scan_template.php`)
+Staat een site in een submap van de webroot (bijvoorbeeld twee sites naast elkaar in `public_html`), dan is `public_html` zelf een tussenniveau. Dat gaf twee problemen:
+
+- **Valse meldingen** voor `public_html/index.php` ("PHP-bestand buiten de website-root") en `public_html/.htaccess` ("ongebruikelijke .htaccess buiten de root"). Een tussenniveau dat een webroot is (gebruikelijke naam als `public_html`/`httpdocs`/`htdocs`/`www`, of gelijk aan `DOCUMENT_ROOT`), en alles daaronder, krijgt nu alleen de gewone inhoudscontrole.
+- **De andere site werd volledig meegescand.** Een andere Joomla-installatie op een tussenniveau (eigen `configuration.php` + `administrator`-map) wordt nu overgeslagen en in de ruwe scanuitvoer genoemd; die hoort bij een eigen monitor-item.
+
+### Scanscript: PHP-bestand in de accountroot (`scan_template.php`)
+- Een los PHP-bestand direct in de accountroot wordt nu gemeld als verdacht (risico 80), net als op de tussenniveaus tussen accountroot en website-root. Tot nu toe stond het er alleen als "onbekend item" (risico 50). Het staat niet meer daarnaast ook nog als onbekend item in de lijst.
+- Niet als de accountroot zelf een webroot of een Joomla-installatie is: daar is PHP normaal.
+
+### Scanscript: melding "SCAN ONVOLLEDIG" nauwkeuriger (`scan_template.php`)
+- De melding kwam ook als er na het bereiken van het budget alleen nog items over waren die toch al werden overgeslagen (bijvoorbeeld de map `domains` in de accountroot). Nu telt alleen een item dat echt bekeken had moeten worden.
+- De melding noemt nu welke grens is bereikt: het maximale aantal bestanden, of de maximale scantijd met het aantal bestanden dat tot dan toe is bekeken.
+
+### Helppagina (`help.php`)
+- De helppagina werd zelf als achterdeur gemeld als de monitor binnen een gescande site staat: de voorbeelden van herkende patronen (zoals `document.write(unescape(...))` en `eval()` met `$_POST`) stonden letterlijk in de tekst. Die voorbeelden staan nu als HTML-tekens in de pagina; in de browser ziet het er hetzelfde uit.
+- Uitleg over samengevoegde meldingen toegevoegd.
+
 ## 1.32 - 2026-10-07
 
 ### Scanscript: scanbudget op = melding, en de tussenniveaus vallen er niet meer onder (`scan_template.php`)

@@ -3093,7 +3093,7 @@ function isBekendGoedaardigeHtaccess(string $inhoud): bool
     return false;
 }
 
-function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap)
+function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap, bool $isWebrootMap = false)
 {
     if (!is_readable($bestandpad)) {
         return;
@@ -3164,7 +3164,9 @@ function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap)
     // bewust een klein defensief .htaccess-je ("deny from all") in hun eigen
     // map om directory-browsing te blokkeren. Alleen melden als aparte,
     // lichte waarschuwing zodat je het kan verifiëren, niet als kritiek.
-    if (!$kritiek && !$isAwstatsMap) {
+    // $isWebrootMap: de .htaccess staat in een webroot van het account (bv. public_html, met de site zelf in een submap
+    // daaronder) - daar is een uitgebreide .htaccess heel gewoon, dus geen "ongebruikelijk buiten de root"-melding.
+    if (!$kritiek && !$isAwstatsMap && !$isWebrootMap) {
         $genormaliseerdeRoot = rtrim(str_replace('\\', '/', $startMap), '/');
         $genormaliseerdeMap = rtrim(str_replace('\\', '/', dirname($bestandpad)), '/');
         $isKleinDefensiefBlok = strlen($inhoud) < 400 && !preg_match('/RewriteRule|RewriteCond|FilesMatch/i', $inhoud);
@@ -3527,6 +3529,285 @@ function scanPhpIniVoorVerzwakkingen($bestandpad, &$backdoorVondsten, $startMap)
     ];
 }
 
+// ============================================================================
+// INHOUDSGEHEUGEN - ongewijzigde, eerder schoon bevonden bestanden niet opnieuw inlezen
+// ============================================================================
+//
+// Op een trage server haalt de bestandsscan de tijdsgrens van scanRecursief() niet altijd: het inlezen en doorzoeken
+// van tienduizenden bestanden kost daar meer dan de beschikbare seconden, met elke scan opnieuw de melding "SCAN
+// ONVOLLEDIG" (aanleiding oktober 2026: vier sites bij dezelfde hostingpartij, 17.000 tot 46.000 bestanden in 45
+// seconden). Het overgrote deel van die bestanden verandert tussen twee scans niet. Dit geheugen onthoudt per bestand
+// dat het eerder op inhoud is gecontroleerd zonder enige vondst, samen met een handtekening uit stat(): grootte,
+// mtime, ctime en inode. Is die handtekening bij de volgende scan gelijk, dan is het bestand niet gewijzigd en wordt
+// het niet opnieuw ingelezen. Een onvolledige scan wordt zo bij de volgende scan vanzelf aangevuld.
+//
+// Waarom dit veilig is:
+// - ctime (tijdstip van de laatste wijziging van inhoud of metadata) kan een gewone gebruiker niet terugzetten: elke
+//   schrijfactie, ook touch() en het terugzetten van mtime, zet ctime op "nu". Een backdoor met een nepdatum valt dus
+//   niet onder het geheugen.
+// - Alleen bestanden zonder enige vondst gaan erin. Een bestand met een melding (ook "ter info") wordt elke scan
+//   opnieuw volledig gecontroleerd.
+// - Het geheugen hoort bij precies deze inhoud van het scanscript. Elke nieuwe versie (nieuwe of aangepaste patronen,
+//   via de automatische update) begint met een leeg geheugen en controleert dus alles opnieuw.
+// - Elk bestand wordt hoe dan ook minstens eens per INHOUDSGEHEUGEN_MAX_DAGEN dagen opnieuw ingelezen.
+// - Een bestand waarvan de uitkomst afhangt van wat er náást staat (index.php in een verdubbelde mapnaam, zie
+//   isLosPhpBestandInMap()) gaat nooit in het geheugen.
+// - Alleen het inlezen van de inhoud wordt overgeslagen. De controles op pad en naam (PHP in images/ of in een map
+//   voor statische bestanden, back-uparchieven, willekeurige mapnamen), de .htaccess- en php.ini-controle en de
+//   rechtencontrole draaien elke scan gewoon.
+//
+// Het geheugenbestand staat in _scan_beheer (afgeschermd met .htaccess) en bevat als sleutel alleen een hash van het
+// pad, dus geen leesbare bestandsnamen. Scannen twee monitors dezelfde site met elk een eigen scanscript, dan heeft
+// elk scanscript zijn eigen geheugenbestand; een geheugenbestand dat INHOUDSGEHEUGEN_MAX_DAGEN dagen niet is
+// bijgewerkt, wordt opgeruimd.
+const INHOUDSGEHEUGEN_MAX_DAGEN = 30;
+
+$inhoudsgeheugen = [
+    'actief' => false,
+    'bestand' => '',
+    'oud' => [],
+    'nieuw' => [],
+    'bezocht' => [],
+    'overgeslagen' => 0,
+    'gecontroleerd' => 0,
+    'seconden' => 0.0,
+    'melding' => '',
+];
+
+/**
+ * Laadt het geheugen dat bij deze inhoud van het scanscript hoort. Lukt iets niet (eigen bestand niet leesbaar,
+ * beheermap niet beschrijfbaar), dan blijft het geheugen uit en wordt alles gewoon ingelezen, zoals voorheen.
+ */
+function inhoudsgeheugenStart(string $beheerMap): void
+{
+    global $inhoudsgeheugen;
+
+    $eigenInhoud = @file_get_contents(__FILE__);
+    if ($eigenInhoud === false || !is_dir($beheerMap) || !is_writable($beheerMap)) {
+        $inhoudsgeheugen['melding'] = 'uitgeschakeld (scanscript niet leesbaar of _scan_beheer niet beschrijfbaar) - alle bestanden ingelezen';
+        return;
+    }
+
+    $vingerafdruk = substr(hash('sha256', $eigenInhoud), 0, 16);
+    $inhoudsgeheugen['bestand'] = $beheerMap . '/inhoudsgeheugen_' . $vingerafdruk . '.json';
+    $inhoudsgeheugen['actief'] = true;
+
+    $oud = [];
+    if (is_file($inhoudsgeheugen['bestand']) && !is_link($inhoudsgeheugen['bestand'])) {
+        $data = json_decode((string) @file_get_contents($inhoudsgeheugen['bestand']), true);
+        if (is_array($data) && isset($data['bestanden']) && is_array($data['bestanden'])) {
+            $oud = $data['bestanden'];
+        }
+    }
+    $inhoudsgeheugen['oud'] = $oud;
+    // Begint als kopie: een bestand dat deze scan niet aan de beurt komt (scanbudget op) houdt zo zijn plek.
+    $inhoudsgeheugen['nieuw'] = $oud;
+    $inhoudsgeheugen['melding'] = empty($oud) ? 'nieuw opgebouwd (eerste scan met deze versie van het scanscript)' : '';
+}
+
+/**
+ * Handtekening van een bestand voor het geheugen, of null als het bestand er niet voor in aanmerking komt.
+ */
+function inhoudsgeheugenHandtekening(string $pad): ?string
+{
+    global $inhoudsgeheugen;
+
+    if (!$inhoudsgeheugen['actief']) {
+        return null;
+    }
+
+    // Uitkomst kan afhangen van de buren in de map (index.php in een verdubbelde mapnaam) - nooit onthouden.
+    $ouder = basename(dirname($pad));
+    if ($ouder !== '' && $ouder === basename(dirname(dirname($pad)))) {
+        return null;
+    }
+
+    $s = @stat($pad);
+    if ($s === false) {
+        return null;
+    }
+
+    return $s['size'] . ':' . $s['mtime'] . ':' . $s['ctime'] . ':' . $s['ino'];
+}
+
+/**
+ * True als dit bestand, met precies deze handtekening, eerder schoon is bevonden en dat niet te lang geleden is.
+ */
+function inhoudsgeheugenIsBekendSchoon(string $pad, string $handtekening): bool
+{
+    global $inhoudsgeheugen;
+
+    $sleutel = substr(md5($pad), 0, 20);
+    $inhoudsgeheugen['bezocht'][$sleutel] = true;
+
+    $waarde = $inhoudsgeheugen['oud'][$sleutel] ?? null;
+    if (!is_string($waarde)) {
+        return false;
+    }
+
+    $delen = explode('|', $waarde, 2);
+    $gecontroleerdOp = (int) ($delen[1] ?? 0);
+    if ($delen[0] !== $handtekening || (time() - $gecontroleerdOp) > INHOUDSGEHEUGEN_MAX_DAGEN * 86400) {
+        unset($inhoudsgeheugen['nieuw'][$sleutel]);
+        return false;
+    }
+
+    $inhoudsgeheugen['overgeslagen']++;
+    return true;
+}
+
+/**
+ * Legt de uitkomst van een inhoudscontrole vast: schoon (geen enkele vondst) gaat in het geheugen, anders eruit.
+ */
+function inhoudsgeheugenNaControle(string $pad, ?string $handtekening, bool $schoon, float $seconden): void
+{
+    global $inhoudsgeheugen;
+
+    $inhoudsgeheugen['gecontroleerd']++;
+    $inhoudsgeheugen['seconden'] += $seconden;
+
+    if (!$inhoudsgeheugen['actief']) {
+        return;
+    }
+
+    $sleutel = substr(md5($pad), 0, 20);
+    $inhoudsgeheugen['bezocht'][$sleutel] = true;
+
+    if ($schoon && $handtekening !== null) {
+        $inhoudsgeheugen['nieuw'][$sleutel] = $handtekening . '|' . time();
+    } else {
+        unset($inhoudsgeheugen['nieuw'][$sleutel]);
+    }
+}
+
+/**
+ * Schrijft het geheugen weg (via een tijdelijk bestand + rename, zodat een afgebroken scan nooit een half bestand
+ * achterlaat) en ruimt verouderde geheugenbestanden op. Na een volledige scan vervallen de regels van bestanden die
+ * niet meer bestaan; na een onvolledige scan blijven ze staan, want dan is niet alles langsgekomen.
+ */
+function inhoudsgeheugenBewaar(bool $scanVolledig): void
+{
+    global $inhoudsgeheugen;
+
+    if (!$inhoudsgeheugen['actief']) {
+        return;
+    }
+
+    $bestanden = $inhoudsgeheugen['nieuw'];
+    if ($scanVolledig) {
+        $bestanden = array_intersect_key($bestanden, $inhoudsgeheugen['bezocht']);
+    }
+
+    $json = json_encode(['aangemaakt' => date('c'), 'bestanden' => $bestanden]);
+    $tijdelijk = $inhoudsgeheugen['bestand'] . '.tmp';
+    if ($json === false || @file_put_contents($tijdelijk, $json, LOCK_EX) === false || !@rename($tijdelijk, $inhoudsgeheugen['bestand'])) {
+        @unlink($tijdelijk);
+        $inhoudsgeheugen['melding'] = trim($inhoudsgeheugen['melding'] . ' - kon niet worden opgeslagen in _scan_beheer');
+    }
+
+    // Opruimen: alleen bestanden met precies dit naampatroon, direct in de beheermap, geen symlinks, en alleen als
+    // ze al INHOUDSGEHEUGEN_MAX_DAGEN dagen niet zijn bijgewerkt (een andere monitor die deze site scant, werkt zijn
+    // eigen geheugenbestand bij elke scan bij en raakt het dus niet kwijt).
+    $beheerMap = dirname($inhoudsgeheugen['bestand']);
+    foreach ((array) @scandir($beheerMap) as $naam) {
+        if (!is_string($naam) || !preg_match('/^inhoudsgeheugen_[0-9a-f]{16}\.json(\.tmp)?$/', $naam)) {
+            continue;
+        }
+        $volledig = $beheerMap . '/' . $naam;
+        if ($volledig === $inhoudsgeheugen['bestand'] || is_link($volledig) || !is_file($volledig)) {
+            continue;
+        }
+        if ((time() - (int) @filemtime($volledig)) > INHOUDSGEHEUGEN_MAX_DAGEN * 86400) {
+            @unlink($volledig);
+        }
+    }
+}
+
+// ============================================================================
+// VOORTGANG BIJ EEN ONVOLLEDIGE SCAN - hoeveel is er blijven liggen?
+// ============================================================================
+//
+// Is het scanbudget van scanRecursief() op, dan wordt de rest van de bestanden alleen nog geteld (niet gelezen),
+// zodat de melding "SCAN ONVOLLEDIG" een percentage kan noemen: verwerkt / (verwerkt + resterend). De telling volgt
+// dezelfde route als scanRecursief() zelf (dezelfde overgeslagen namen, dezelfde dieptegrens, dezelfde bescherming
+// tegen een map die naar de website-root wijst), zodat beide getallen over dezelfde verzameling gaan. Het tellen
+// heeft een eigen, korte tijdsgrens; is die op, dan is het percentage een bovengrens ("hoogstens N%").
+const SCAN_TELBUDGET_SECONDEN = 15;
+
+/**
+ * Telt één resterend item mee, en bij een map ook alles daaronder. Geeft false terug als de telling is gestopt
+ * (eigen tijdsgrens op) - de aanroeper stopt dan ook.
+ */
+function telResterendItem(string $volledigPad, string $startMap, int $diepte): bool
+{
+    static $telStart = null;
+    if ($telStart === null) {
+        $telStart = microtime(true);
+    }
+
+    if (!empty($GLOBALS['scanTellingOnvolledig'])) {
+        return false;
+    }
+    if ((microtime(true) - $telStart) > SCAN_TELBUDGET_SECONDEN) {
+        $GLOBALS['scanTellingOnvolledig'] = true;
+        return false;
+    }
+
+    $GLOBALS['scanResterendeItems'] = ($GLOBALS['scanResterendeItems'] ?? 0) + 1;
+
+    if (!is_dir($volledigPad)) {
+        return true;
+    }
+    $werkelijk = @realpath($volledigPad);
+    $werkelijkeStart = @realpath($startMap);
+    if ($werkelijk !== false && $werkelijkeStart !== false && $werkelijk === $werkelijkeStart) {
+        return true;
+    }
+
+    // Zelfde dieptegrens als scanRecursief(): die wordt voor deze map aangeroepen met $diepte + 1 en stopt boven 10.
+    if ($diepte + 1 > 10 || !is_readable($volledigPad)) {
+        return true;
+    }
+    $items = @scandir($volledigPad);
+    if ($items === false) {
+        return true;
+    }
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..' || $item === 'cache' || $item === 'log' || $item === 'logs' || $item === '_scan_beheer') {
+            continue;
+        }
+        if (!telResterendItem($volledigPad . '/' . $item, $startMap, $diepte + 1)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Percentage van de bestandsscan dat is afgerond, of null als het budget niet op was (scan volledig).
+ *
+ * @return array{procent: int, bovengrens: bool, verwerkt: int, resterend: int}|null
+ */
+function bepaalScanVoortgang(): ?array
+{
+    if (empty($GLOBALS['scanBudgetOp'])) {
+        return null;
+    }
+
+    $verwerkt = (int) ($GLOBALS['scanVerwerkteItems'] ?? 0);
+    $resterend = max(1, (int) ($GLOBALS['scanResterendeItems'] ?? 0));
+    // Afronden naar beneden en nooit 100: een onvolledige scan mag niet als "100%" in beeld komen.
+    $procent = min(99, (int) floor($verwerkt * 100 / ($verwerkt + $resterend)));
+
+    return [
+        'procent' => $procent,
+        'bovengrens' => !empty($GLOBALS['scanTellingOnvolledig']),
+        'verwerkt' => $verwerkt,
+        'resterend' => $resterend,
+    ];
+}
+
 function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkLegitiem, $ignoreerBestanden, $startMap, $diepte = 0, array $topNiveauNegeren = [], &$rechtenAfwijkingen = null, $inGevoeligeUploadmap = false)
 {
     // Mappen waarvan de INHOUD (dus alles eronder, ongeacht diepte) als
@@ -3569,10 +3850,20 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         $scanStartTijd = microtime(true);
     }
 
-    if ($totaalVerwerkteItems >= $maxTotaalTeVerwerken || (microtime(true) - $scanStartTijd) > $maxSecondenVoorRecursie) {
-        $GLOBALS['scanBudgetOp'] = $GLOBALS['scanBudgetOp'] ?? $pad;
-        return;
-    }
+    // Budget op: alleen markeren, nog niet melden - pas als er in deze map ook echt iets te bekijken valt (zie de lus
+    // hieronder). Anders gaf een volle accountroot een melding op een map die toch al werd overgeslagen.
+    $budgetOp = function () use (&$totaalVerwerkteItems, $maxTotaalTeVerwerken, $scanStartTijd, $maxSecondenVoorRecursie): bool {
+        if ($totaalVerwerkteItems < $maxTotaalTeVerwerken && (microtime(true) - $scanStartTijd) <= $maxSecondenVoorRecursie) {
+            return false;
+        }
+        // Vanaf hier wordt niets meer verwerkt, dus dit aantal blijft gelijk - nodig voor het percentage (zie
+        // telResterendItem()).
+        $GLOBALS['scanVerwerkteItems'] = $totaalVerwerkteItems;
+        $GLOBALS['scanBudgetReden'] = $GLOBALS['scanBudgetReden'] ?? ($totaalVerwerkteItems >= $maxTotaalTeVerwerken
+            ? 'het maximale aantal bestanden (' . number_format($maxTotaalTeVerwerken, 0, ',', '.') . ')'
+            : 'de maximale scantijd (' . $maxSecondenVoorRecursie . ' seconden, na ' . number_format($totaalVerwerkteItems, 0, ',', '.') . ' bestanden)');
+        return true;
+    };
 
     if ($diepte > 10) {
         return;
@@ -3588,11 +3879,6 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
     }
 
     foreach ($items as $item) {
-        if ($totaalVerwerkteItems >= $maxTotaalTeVerwerken || (microtime(true) - $scanStartTijd) > $maxSecondenVoorRecursie) {
-            $GLOBALS['scanBudgetOp'] = $GLOBALS['scanBudgetOp'] ?? ($pad . '/' . $item);
-            return;
-        }
-
         if ($item === '.' || $item === '..' || $item === 'cache' || $item === 'log' || $item === 'logs' || $item === '_scan_beheer') {
             continue;
         }
@@ -3602,6 +3888,18 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         // dieper binnen de website zelf) - zie de aanroep bij het extra
         // scanpad hieronder.
         if ($diepte === 0 && in_array($item, $topNiveauNegeren, true)) {
+            continue;
+        }
+
+        // Pas hier, na de overgeslagen items: alleen een item dat echt bekeken had moeten worden telt als "gemist".
+        if ($budgetOp()) {
+            $GLOBALS['scanBudgetOp'] = $GLOBALS['scanBudgetOp'] ?? ($pad . '/' . $item);
+            // Niet meer scannen, wel nog tellen wat er is blijven liggen: daaruit volgt het percentage dat de monitor
+            // toont ("scan afgerond voor N%"). Tellen kost alleen scandir()/is_dir(), geen inhoud lezen. Loopt ook dat
+            // tellen tegen zijn eigen tijdsgrens aan, dan stopt het en wordt het percentage een bovengrens.
+            if (!telResterendItem($pad . '/' . $item, $startMap, $diepte)) {
+                return;
+            }
             continue;
         }
 
@@ -3627,7 +3925,10 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         // actief.
         $binnenCageFsOfClSelector = (bool) preg_match('#[/\\\\]\.(cagefs|cl\.selector)([/\\\\]|$)#i', $volledigPad);
 
-        if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector) {
+        // Akeeba Backup-archieven van deze site buiten de website-root: geen rechtencontrole. PHP maakt ze op veel
+        // servers aan met 666, en elke nieuwe back-up gaf zo weer een nieuwe melding. Zie isAkeebaBackupArchiefVanDezeSite().
+        if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector
+            && !isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
             $afwijking = controleerBestandsrechten($volledigPad, is_dir($volledigPad));
             if ($afwijking !== null) {
                 $rechtenAfwijkingen[] = $afwijking;
@@ -3707,7 +4008,16 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
             // een programmeerstijl die regelmatig als valse-positief wordt gezien)
             $heeftPhpUitvoerbareExtensie = isPhpUitvoerbareExtensie($item);
 
-            if ($heeftPhpUitvoerbareExtensie && !isBekendeLegitiemeLibrary($volledigPad, $startMap)) {
+            // Inhoudsgeheugen (zie inhoudsgeheugenStart()): ongewijzigd sinds een eerdere, schone controle? Dan de drie
+            // inhoudscontroles hieronder overslaan. Alles verderop (controles op pad en naam, .htaccess, php.ini) draait
+            // altijd. De handtekening wordt bewust vóór het inlezen bepaald: verandert het bestand tijdens de scan, dan
+            // klopt de handtekening de volgende keer niet meer en wordt het opnieuw ingelezen.
+            $geheugenHandtekening = inhoudsgeheugenHandtekening($volledigPad);
+            $uitGeheugen = $geheugenHandtekening !== null && inhoudsgeheugenIsBekendSchoon($volledigPad, $geheugenHandtekening);
+            $vondstenVoorInhoud = count($backdoorVondsten) + count($mogelijkLegitiem);
+            $inhoudStart = microtime(true);
+
+            if (!$uitGeheugen && $heeftPhpUitvoerbareExtensie && !isBekendeLegitiemeLibrary($volledigPad, $startMap)) {
                 scanPhpVoorBackdoors($volledigPad, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden);
             }
 
@@ -3715,14 +4025,23 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
             // gevoelige uploadmap (images/tmp/media) en alleen voor bestanden
             // die de extensiecheck hierboven NIET al meenam (voorkomt een
             // dubbele scan/dubbele melding van hetzelfde bestand).
-            if (!$heeftPhpUitvoerbareExtensie && $inGevoeligeUploadmap) {
+            if (!$uitGeheugen && !$heeftPhpUitvoerbareExtensie && $inGevoeligeUploadmap) {
                 scanNietPhpBestandOpVerstopteCode($volledigPad, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap);
             }
 
             // Gzip-payload met de extensie van een gewoon bestand (.less/.js/.png/.webp/.htm ...) - overal, niet alleen
             // in uploadmappen: de aangetroffen payloads stonden juist diep in administrator/components/.
-            if (!$heeftPhpUitvoerbareExtensie) {
+            if (!$uitGeheugen && !$heeftPhpUitvoerbareExtensie) {
                 controleerVermomdGecomprimeerdBestand($volledigPad, $backdoorVondsten, $startMap);
+            }
+
+            if (!$uitGeheugen) {
+                inhoudsgeheugenNaControle(
+                    $volledigPad,
+                    $geheugenHandtekening,
+                    (count($backdoorVondsten) + count($mogelijkLegitiem)) === $vondstenVoorInhoud,
+                    microtime(true) - $inhoudStart
+                );
             }
 
             // Los PHP-bestand in een map van media/ die alleen voor statische bestanden is (js/css/images/...).
@@ -3880,6 +4199,156 @@ function controleerBestandsrechten($pad, $isMap)
 // dat dit van buiten de website zelf komt.
 // ============================================================================
 
+// ============================================================================
+// AKEEBA BACKUP-ARCHIEVEN VAN DEZE SITE HERKENNEN (buiten de website-root)
+// ============================================================================
+//
+// Akeeba Backup kan zijn archieven buiten de website-root wegschrijven, bijvoorbeeld in een map "Akeeba-Backup" of
+// "akeebabackup" in de accountroot. Dat is juist de veilige plek (niet via het web te downloaden), maar het extra
+// scanpad meldde zo'n map als "onbekend item" en elk archief met de rechten 666 (zoals PHP ze op veel servers
+// aanmaakt) als "afwijkende rechten" - bij elke scan opnieuw, want elke nieuwe back-up heeft een nieuwe naam.
+//
+// Een archief geldt als back-up van DEZE site als alle drie kloppen:
+//  1. de bestandsnaam volgt Akeeba's standaardpatroon met de hostnaam van deze site:
+//     site-<host>-<JJJJMMDD>-<UUMMSS><tijdzone>-<willekeurige code>.jpa (ook .jps, .zip en de delen .j01/.z01 ...);
+//  2. het bestand (of bij een gesplitst archief het eerste deel) begint met de echte kop van dat formaat: "JPA", "JPS"
+//     of de zip-kop. Een ander bestand dat alleen zo is genoemd, valt daar dus buiten;
+//  3. het staat buiten de website-root (binnen de website-root blijft een archief juist een melding waard: daar is
+//     het vaak te downloaden - zie scanRecursief()).
+// Een map geldt als uitvoermap van Akeeba voor deze site als er minstens één zo'n archief in staat en verder alleen
+// wat Akeeba er zelf neerzet (index.html/.htaccess/web.config en de eigen logbestanden met een die()-kop), zonder
+// submappen. Staat er iets anders tussen, dan wordt de map gewoon gemeld zoals voorheen.
+//
+// Herkende archieven en mappen worden niet meer gemeld, maar staan wel in de ruwe scanuitvoer (bij "Extra scanpad"),
+// zodat altijd na te gaan is wat er is herkend. De inhoudscontrole van scanRecursief() blijft er gewoon overheen gaan.
+
+/**
+ * Hostnaam van deze site zoals Akeeba die in [HOST] zet: kleine letters, zonder poort en zonder "www.".
+ */
+function huidigeSiteHostVoorBackups(): string
+{
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $host = preg_replace('/:\d+$/', '', $host);
+
+    return (string) preg_replace('/^www\./', '', $host);
+}
+
+/**
+ * True als het eerste van de opgegeven bestanden dat bestaat, begint met de verwachte kop.
+ */
+function heeftArchiefKop(array $kandidaten, string $kop): bool
+{
+    foreach ($kandidaten as $kandidaat) {
+        if (!is_file($kandidaat) || is_link($kandidaat)) {
+            continue;
+        }
+        $fh = @fopen($kandidaat, 'rb');
+        if ($fh === false) {
+            continue;
+        }
+        $begin = (string) @fread($fh, strlen($kop));
+        @fclose($fh);
+        if ($begin === $kop) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Is dit bestand een echt Akeeba Backup-archief (of deel daarvan) van deze site, buiten de website-root?
+ */
+function isAkeebaBackupArchiefVanDezeSite(string $pad, string $startMap): bool
+{
+    static $uitkomsten = [];
+    if (isset($uitkomsten[$pad])) {
+        return $uitkomsten[$pad];
+    }
+    $uitkomsten[$pad] = false;
+
+    // Eerst de naam (goedkoop), pas daarna het bestandssysteem: deze functie draait voor elk bestand in het extra scanpad.
+    $host = huidigeSiteHostVoorBackups();
+    $patroon = '/^site-(?:www\.)?' . preg_quote($host, '/') . '-\d{8}-\d{6}[a-z]{0,6}-[A-Za-z0-9_-]{4,}\.(jpa|jps|zip|j\d{2}|z\d{2})$/i';
+    if ($host === '' || !preg_match($patroon, basename($pad), $m) || !is_file($pad) || is_link($pad)) {
+        return false;
+    }
+
+    // Binnen de website-root nooit: daar is een archief vaak via het web te downloaden.
+    $werkelijkPad = @realpath($pad);
+    $werkelijkeStart = @realpath($startMap);
+    if ($werkelijkPad === false || $werkelijkeStart === false || strpos($werkelijkPad, $werkelijkeStart . '/') === 0) {
+        return false;
+    }
+
+    // Kop controleren. Bij een gesplitst archief staat de kop in het eerste deel (.j01/.z01) en niet in het
+    // slotdeel (.jpa/.jps/.zip); daarom beide proberen, voor elk deel van het archief.
+    $basis = substr($pad, 0, -strlen($m[1]));
+    $extensie = strtolower($m[1]);
+    if ($extensie === 'jps') {
+        $geldig = heeftArchiefKop([$basis . 'jps', $basis . 'j01'], 'JPS');
+    } elseif ($extensie === 'zip' || $extensie[0] === 'z') {
+        $geldig = heeftArchiefKop([$basis . 'zip', $basis . 'z01'], "PK\x03\x04");
+    } else {
+        // .jpa of .jNN - een gesplitst .jps-archief gebruikt ook .jNN-delen
+        $geldig = heeftArchiefKop([$basis . 'jpa', $basis . 'j01'], 'JPA')
+            || heeftArchiefKop([$basis . 'jps', $basis . 'j01'], 'JPS');
+    }
+
+    if ($geldig) {
+        $GLOBALS['herkendeAkeebaArchieven'][$pad] = true;
+    }
+
+    return $uitkomsten[$pad] = $geldig;
+}
+
+/**
+ * Is deze map (buiten de website-root) de uitvoermap van Akeeba Backup voor deze site? Zie de toelichting hierboven.
+ */
+function isAkeebaUitvoermapVanDezeSite(string $map, string $startMap): bool
+{
+    if (!is_dir($map) || is_link($map)) {
+        return false;
+    }
+    $items = @scandir($map);
+    if ($items === false) {
+        return false;
+    }
+
+    $aantalArchieven = 0;
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        $volledig = $map . '/' . $item;
+        if (is_dir($volledig)) {
+            return false;
+        }
+        if (isAkeebaBackupArchiefVanDezeSite($volledig, $startMap)) {
+            $aantalArchieven++;
+            continue;
+        }
+        if (in_array(strtolower($item), ['index.html', 'index.htm', '.htaccess', 'web.config'], true)) {
+            continue;
+        }
+        // Akeeba's eigen logbestanden: akeeba.backend.log, akeeba.backend.id20261008-101814-123456.log.php ...
+        if (preg_match('/^akeeba(?:\.[A-Za-z0-9_-]+)*\.log(?:\.php)?$/i', $item)) {
+            if (substr(strtolower($item), -4) !== '.php' || isNietUitvoerbaarPhpDatabestand($volledig)) {
+                continue;
+            }
+        }
+
+        return false; // iets wat Akeeba daar zelf niet neerzet
+    }
+
+    if ($aantalArchieven > 0) {
+        $GLOBALS['herkendeAkeebaMappen'][$map] = $aantalArchieven;
+        return true;
+    }
+
+    return false;
+}
+
 function checkExtraScanpadTopNiveau($extraRoot, &$rootUnknown, array $negeren, $startMap)
 {
     $items = @scandir($extraRoot);
@@ -3972,6 +4441,20 @@ function checkExtraScanpadTopNiveau($extraRoot, &$rootUnknown, array $negeren, $
             if ($inhoudVoorVingerafdruk !== false && isEigenScanScriptInhoud($inhoudVoorVingerafdruk)) {
                 continue; // eigen scanscript van (mogelijk) een andere monitor-installatie
             }
+        }
+
+        // Akeeba Backup-archief van deze site, of de uitvoermap daarvan: niet als onbekend item melden (zie
+        // isAkeebaUitvoermapVanDezeSite()). Een losse archief krijgt ook geen rechtencontrole; bij een map blijft de
+        // rechtencontrole van de map zelf staan.
+        if (!$isMap && isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
+            continue;
+        }
+        if ($isMap && isAkeebaUitvoermapVanDezeSite($volledigPad, $startMap)) {
+            $rechtenAfwijkingMap = controleerBestandsrechten($volledigPad, true);
+            if ($rechtenAfwijkingMap !== null) {
+                $rootUnknown[] = $rechtenAfwijkingMap;
+            }
+            continue;
         }
 
         $rootUnknown[] = [
@@ -5333,6 +5816,10 @@ $startTime = time();
 // Scan root level
 checkRootLevel($startMap, $rootLevelUnknown, $vertrouwdeRootMappen, $ignoreerBestanden, $vertrouwdeRootBestanden);
 
+// Inhoudsgeheugen laden (zie inhoudsgeheugenStart()) - vóór de eerste scanRecursief()-aanroep, ook die voor de
+// tussenniveaus en het extra scanpad verderop gebruiken het.
+inhoudsgeheugenStart($beheerMap);
+
 // Scan alles voor backdoors + verdachte .htaccess-bestanden
 scanRecursief($startMap, $backdoorVondsten, $htaccessVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap);
 
@@ -5574,12 +6061,23 @@ if (!$extraScanIngeschakeld) {
         $ketenDelen = explode('/', ltrim(substr($startMap, strlen($extraScanRootAbsoluut)), '/'));
         $tussenPad = $extraScanRootAbsoluut;
         $geenRechtencontrole = null;
+        // Staat de site in een SUBMAP van de webroot (bv. domains/<domein>/public_html/cuppen, met een tweede site in
+        // public_html/clabbers), dan is public_html zelf ook een tussenniveau. Dat is gewone, publieke webinhoud en geen
+        // map van het hostingaccount: geen melding "PHP buiten de website-root" of "ongebruikelijke .htaccess" (wel de
+        // gewone inhoudscontrole). Herkend aan de gebruikelijke webrootnamen of aan DOCUMENT_ROOT; alles daaronder telt
+        // ook als webinhoud. Aanleiding: valse meldingen voor public_html/index.php en .htaccess bij zo'n opzet.
+        $webrootNamen = ['public_html', 'private_html', 'httpdocs', 'htdocs', 'www', 'web', 'html', 'public'];
+        $documentRootEcht = !empty($_SERVER['DOCUMENT_ROOT']) ? @realpath($_SERVER['DOCUMENT_ROOT']) : false;
+        $binnenWebroot = false;
         for ($i = 0; $i < count($ketenDelen) - 1; $i++) {
             $tussenPad .= '/' . $ketenDelen[$i];
             $volgendeStap = $ketenDelen[$i + 1];
             if (!is_dir($tussenPad) || !is_readable($tussenPad)) {
                 break;
             }
+            $binnenWebroot = $binnenWebroot
+                || in_array(strtolower(basename($tussenPad)), $webrootNamen, true)
+                || ($documentRootEcht !== false && @realpath($tussenPad) === $documentRootEcht);
             $tussenItems = @scandir($tussenPad) ?: [];
             if (strtolower(basename($tussenPad)) === 'domains') {
                 $tussenNegeren = array_values(array_filter($tussenItems, function ($it) use ($tussenPad) {
@@ -5588,6 +6086,24 @@ if (!$extraScanIngeschakeld) {
             } else {
                 $tussenNegeren = array_values(array_unique(array_merge($extraScanPadNegeren, [$volgendeStap])));
             }
+            // Andere, losstaande Joomla-installaties op dit niveau (eigen configuration.php + administrator-map) niet
+            // meescannen: die horen bij een eigen monitor-item. Zonder dit werd bij twee sites naast elkaar in
+            // public_html de complete andere site onder deze site meegescand.
+            // Een koppeling naar de eigen keten (bv. private_html als symlink naar public_html) wordt stil overgeslagen.
+            $andereSites = [];
+            $volgendeStapEcht = @realpath($tussenPad . '/' . $volgendeStap);
+            foreach ($tussenItems as $tussenItem) {
+                $sub = $tussenPad . '/' . $tussenItem;
+                if ($tussenItem === '.' || $tussenItem === '..' || $tussenItem === $volgendeStap || !is_dir($sub)) {
+                    continue;
+                }
+                if ($volgendeStapEcht !== false && @realpath($sub) === $volgendeStapEcht) {
+                    $tussenNegeren[] = $tussenItem;
+                } elseif (is_file($sub . '/configuration.php') && is_dir($sub . '/administrator')) {
+                    $andereSites[] = $tussenItem;
+                }
+            }
+            $tussenNegeren = array_values(array_unique(array_merge($tussenNegeren, $andereSites)));
             // Losse bestanden op dit niveau rechtstreeks controleren, BUITEN het gedeelde scanbudget van scanRecursief()
             // om: het zijn er maar een handvol, en juist hier stonden de backdoor en de .htaccess. Op een grote site
             // was dat budget (aantal items / tijd) al op voordat dit niveau aan de beurt kwam, waardoor de .htaccess
@@ -5606,14 +6122,16 @@ if (!$extraScanIngeschakeld) {
                 $tussenOverzicht[] = $tussenItem . ' (' . (int) @filesize($tb) . ' b, ' . substr(sprintf('%o', (int) @fileperms($tb)), -4)
                     . (is_readable($tb) ? '' : ', NIET LEESBAAR') . ')';
             }
-            echo 'Tussenniveau ' . $tussenPad . ': ' . (empty($tussenOverzicht) ? 'geen losse bestanden' : implode(', ', $tussenOverzicht)) . "\n";
+            echo 'Tussenniveau ' . $tussenPad . ($binnenWebroot ? ' (webroot)' : '') . ': '
+                . (empty($tussenOverzicht) ? 'geen losse bestanden' : implode(', ', $tussenOverzicht))
+                . (empty($andereSites) ? '' : '; andere Joomla-installatie(s) overgeslagen: ' . implode(', ', $andereSites)) . "\n";
 
             foreach ($tussenBestanden as $tussenItem) {
                 $tussenBestand = $tussenPad . '/' . $tussenItem;
                 if (isPhpUitvoerbareExtensie($tussenItem)) {
                     scanPhpVoorBackdoors($tussenBestand, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden);
                 } elseif (strtolower($tussenItem) === '.htaccess') {
-                    scanHtaccessVoorMalware($tussenBestand, $htaccessVondsten, $startMap);
+                    scanHtaccessVoorMalware($tussenBestand, $htaccessVondsten, $startMap, $binnenWebroot);
                 } elseif (strtolower($tussenItem) === 'php.ini' || strtolower($tussenItem) === '.user.ini') {
                     scanPhpIniVoorVerzwakkingen($tussenBestand, $backdoorVondsten, $startMap);
                 }
@@ -5623,6 +6141,10 @@ if (!$extraScanIngeschakeld) {
 
             // Elk los PHP-bestand op zo'n tussenniveau melden, ongeacht inhoud: de hostingpartij en Joomla zetten
             // daar nooit PHP neer. Vangt ook (sterk) geobfusceerde backdoors die geen inhoudspatroon raken.
+            // Niet in een webroot (zie hierboven): daar is een index.php of ander PHP-bestand normaal.
+            if ($binnenWebroot) {
+                continue;
+            }
             $alGemeld = array_column($backdoorVondsten, 'bestandspad');
             foreach ($tussenItems as $tussenItem) {
                 $tussenBestand = $tussenPad . '/' . $tussenItem;
@@ -5662,18 +6184,70 @@ if (!$extraScanIngeschakeld) {
         $rootLevelUnknown[] = $afwijking;
     }
 
+    // Los PHP-bestand direct in de accountroot: zelfde regel als op de tussenniveaus hierboven (de hostingpartij en
+    // Joomla zetten daar nooit PHP neer). Werd tot nu toe alleen als "onbekend item" (risico 50) gemeld. Niet als de
+    // accountroot zelf een webroot of een Joomla-installatie is: dan staan de kernbestanden al op de negeerlijst, en
+    // is PHP daar normaal.
+    $accountrootIsWebroot = in_array(strtolower(basename($extraScanRootAbsoluut)), ['public_html', 'private_html', 'httpdocs', 'htdocs', 'www', 'web', 'html', 'public'], true)
+        || (!empty($_SERVER['DOCUMENT_ROOT']) && @realpath($_SERVER['DOCUMENT_ROOT']) === @realpath($extraScanRootAbsoluut))
+        || (is_file($extraScanRootAbsoluut . '/configuration.php') && is_dir($extraScanRootAbsoluut . '/administrator'));
+    if (!$accountrootIsWebroot) {
+        $alGemeld = array_column($backdoorVondsten, 'bestandspad');
+        foreach (@scandir($extraScanRootAbsoluut) ?: [] as $rootItem) {
+            $rootBestand = $extraScanRootAbsoluut . '/' . $rootItem;
+            if ($rootItem === '.' || $rootItem === '..' || in_array($rootItem, $extraScanPadNegeren, true) || !is_file($rootBestand)
+                || !isPhpUitvoerbareExtensie($rootItem) || in_array($rootBestand, $alGemeld, true)) {
+                continue;
+            }
+            $backdoorVondsten[] = [
+                'naam' => $rootBestand,
+                'reden' => 'PHP-bestand direct in de accountroot ("' . $extraScanRootAbsoluut . '") - de hostingpartij en Joomla zetten daar geen '
+                    . 'PHP neer; een achtergelaten backdoor of een vergeten eigen script (bv. een eenmalig herstelscript). Controleren en '
+                    . 'verwijderen, VERDACHT',
+                'risico' => 80,
+                'bestandspad' => $rootBestand,
+                'gewijzigd' => date('Y-m-d H:i', @filemtime($rootBestand) ?: time()),
+                'grootte' => (int) @filesize($rootBestand),
+            ];
+            // Niet daarnaast nog als "onbekend item" in de lijst.
+            $rootLevelUnknown = array_values(array_filter($rootLevelUnknown, fn($r) => ($r['pad'] ?? '') !== $rootBestand));
+        }
+    }
+
     $aantalNaExtraScan = count($backdoorVondsten) + count($htaccessVondsten);
     $extraScanMelding = "Extra map \"$extraScanRootAbsoluut\" meegescand ($extraScanNiveauGebruikt niveau(s) boven de website-root, automatisch bepaald: "
         . ($aantalNaExtraScan - $aantalVoorExtraScan) . " extra vondst(en) daar gevonden, "
         . (count($rechtenAfwijkingenExtra) + $rechtenTopNiveau) . " afwijkende rechten gesignaleerd)."
         . ' Standaard overgeslagen: ' . implode(', ', $standaardExtraScanpadNegeren) . '.'
         . (!empty($extraScanPadNegerenEigen) ? ' Zelf ook overgeslagen: ' . implode(', ', $extraScanPadNegerenEigen) . '.' : '');
+
+    // Herkende Akeeba Backup-archieven van deze site (zie isAkeebaBackupArchiefVanDezeSite()): niet gemeld, wel vermeld.
+    $herkendeArchieven = array_keys($GLOBALS['herkendeAkeebaArchieven'] ?? []);
+    if (!empty($herkendeArchieven)) {
+        $herkendeMappen = array_keys($GLOBALS['herkendeAkeebaMappen'] ?? []);
+        $extraScanMelding .= ' Herkend als Akeeba Backup-archief van deze site (niet gemeld): ' . count($herkendeArchieven) . ' bestand(en)'
+            . (!empty($herkendeMappen) ? ', in uitvoermap ' . implode(', ', $herkendeMappen) : '') . '.';
+    }
 }
 
 // Scanbudget van scanRecursief() op (zie daar: maximaal aantal items / seconden voor de hele scan)? Dan is een deel
 // van de bestanden niet bekeken. Voorheen gebeurde dat stil, waardoor een onvolledige scan er volledig uitzag
 // (aanleiding oktober 2026: een kwaadaardige .htaccess boven public_html werd op een grote site zo overgeslagen).
+
+// Eerst het inhoudsgeheugen wegschrijven: alle scanRecursief()-aanroepen zijn nu klaar. Ook na een onvolledige scan,
+// want juist dan zorgt het geheugen ervoor dat de volgende scan verder komt.
+inhoudsgeheugenBewaar(empty($GLOBALS['scanBudgetOp']));
+echo 'Inhoudsgeheugen: ' . number_format($inhoudsgeheugen['overgeslagen'], 0, ',', '.') . ' bestand(en) ongewijzigd sinds een eerdere controle (niet opnieuw ingelezen), '
+    . number_format($inhoudsgeheugen['gecontroleerd'], 0, ',', '.') . ' op inhoud gecontroleerd in '
+    . number_format($inhoudsgeheugen['seconden'], 1, ',', '.') . ' s'
+    . ($inhoudsgeheugen['melding'] !== '' ? ' - ' . $inhoudsgeheugen['melding'] : '') . ".\n";
+
 if (!empty($GLOBALS['scanBudgetOp'])) {
+    // Percentage in een vaste vorm ("38% van de bestanden bekeken", of "hoogstens 38% ..."), zodat de monitor het uit
+    // de reden kan halen en op de monitorpagina "Scan afgerond voor 38%" kan tonen in plaats van "1 verdacht" - zie
+    // haalScanVoortgangUitItems() in verdacht_functies.php. Die tekst dus niet aanpassen zonder die functie mee te nemen.
+    $scanVoortgang = bepaalScanVoortgang();
+    $voortgangTekst = ($scanVoortgang['bovengrens'] ? 'hoogstens ' : '') . $scanVoortgang['procent'] . '% van de bestanden bekeken';
     $rootLevelUnknown[] = [
         // Type 'cluster' (verzamelmelding): geen beheeracties als Quarantaine/Verwijder in de monitor; naam zonder
         // haakjes, zie de toelichting bij vindMassaleUpload().
@@ -5682,12 +6256,18 @@ if (!empty($GLOBALS['scanBudgetOp'])) {
         'pad' => (string) $GLOBALS['scanBudgetOp'],
         'risico' => 50,
         'gewijzigd' => date('Y-m-d H:i'),
-        'reden_override' => 'SCAN ONVOLLEDIG - het maximale aantal bestanden of de maximale scantijd is bereikt; de bestandsscan is gestopt bij "'
+        'reden_override' => 'SCAN ONVOLLEDIG - ' . $voortgangTekst . ' - '
+            . ($GLOBALS['scanBudgetReden'] ?? 'het maximale aantal bestanden of de maximale scantijd') . ' is bereikt; de bestandsscan is gestopt bij "'
             . str_replace($startMap, '', (string) $GLOBALS['scanBudgetOp']) . '". Alles daarna (op deze plek en verderop in de scanvolgorde) '
-            . 'is niet op verdachte inhoud gecontroleerd. Bij een grote site of een volle accountroot: ruim onnodige bestanden op, of sluit '
-            . 'grote mappen buiten de website uit via de site-instellingen.',
+            . 'is niet op verdachte inhoud gecontroleerd. De volgende scan leest bestanden die sinds deze scan niet zijn gewijzigd niet opnieuw '
+            . 'in en komt daardoor verder; meestal is de melding na een of twee nieuwe scans verdwenen. Blijft hij staan, ruim dan onnodige '
+            . 'bestanden op, of sluit grote mappen buiten de website uit via de site-instellingen.',
     ];
-    echo "⚠️ Scanbudget bereikt: bestandsscan gestopt bij " . $GLOBALS['scanBudgetOp'] . " - resultaat onvolledig.\n";
+    echo "⚠️ Scanbudget bereikt (" . ($GLOBALS['scanBudgetReden'] ?? '?') . "): bestandsscan gestopt bij " . $GLOBALS['scanBudgetOp'] . " - resultaat onvolledig.\n";
+    echo 'Voortgang bestandsscan: ' . ($scanVoortgang['bovengrens'] ? 'hoogstens ' : '') . $scanVoortgang['procent'] . '% ('
+        . number_format($scanVoortgang['verwerkt'], 0, ',', '.') . ' items bekeken, '
+        . ($scanVoortgang['bovengrens'] ? 'minstens ' : '') . number_format($scanVoortgang['resterend'], 0, ',', '.') . ' blijven liggen'
+        . ($scanVoortgang['bovengrens'] ? '; het tellen van de rest is na ' . SCAN_TELBUDGET_SECONDEN . ' seconden gestopt' : '') . ").\n";
 }
 
 // Kernbestand-integriteitscontrole: code vóór Joomla's _JEXEC-bootstrap

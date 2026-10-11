@@ -71,15 +71,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? implode(',', array_filter(array_map('trim', explode(',', $negerenRuw))))
             : null;
 
-        $stmt = $pdo->prepare("UPDATE sites SET extra_scan_pad = ?, extra_scan_pad_negeren = ? WHERE id = ?");
-        $stmt->execute([$extraScanPad, $negerenNetjes, $siteId]);
+        // Eigen uitsluitpatronen voor de website-root (bv. sitemap*.xml). Alleen veilige tekens: het patroon komt
+        // letterlijk in het scanscript terecht (zie genereerScanScriptInhoud()).
+        $patronenRuw = preg_replace('/[^A-Za-z0-9._*?, \/-]/', '', (string) ($_POST['root_negeer_patronen'] ?? ''));
+        $patronenNetjes = trim($patronenRuw) !== ''
+            ? implode(',', array_filter(array_map('trim', explode(',', $patronenRuw))))
+            : null;
+
+        // Zelfherstellend: kolom aanmaken als migratiestap 25 op deze installatie niet is uitgevoerd.
+        require_once __DIR__ . '/auto_migratie.php';
+        zorgVoorRootNegeerPatronenKolom($pdo);
+
+        $stmt = $pdo->prepare("UPDATE sites SET extra_scan_pad = ?, extra_scan_pad_negeren = ?, root_negeer_patronen = ? WHERE id = ?");
+        $stmt->execute([$extraScanPad, $negerenNetjes, $patronenNetjes, $siteId]);
 
         $site['extra_scan_pad'] = $extraScanPad;
         $site['extra_scan_pad_negeren'] = $negerenNetjes;
+        $site['root_negeer_patronen'] = $patronenNetjes;
 
-        $succesmelding = !empty($site['ftp_host'])
-            ? 'Opgeslagen. Druk helemaal onderaan op de knop om het bijgewerkte scanscript automatisch via FTP naar deze site te versturen.'
-            : 'Opgeslagen. Download hieronder het bijgewerkte scanscript en zet dat handmatig via FTP op deze site.';
+        // Opnieuw uploaden is niet nodig: het scanscript op de site vergelijkt zich bij elke scan met de versie die de
+        // monitor voor deze site maakt (haal_scanscript_update.php, inclusief deze instellingen) en werkt zichzelf bij.
+        $succesmelding = 'Opgeslagen. Het scanscript op de site werkt zichzelf bij de volgende scan bij met deze instellingen; '
+            . 'opnieuw uploaden is niet nodig.';
     } elseif ($actie === 'opslaan_ftp') {
         $ftpHost       = trim($_POST['ftp_host'] ?? '');
         $ftpProtocol   = ($_POST['ftp_protocol'] ?? 'ftp') === 'sftp' ? 'sftp' : 'ftp';
@@ -504,16 +517,30 @@ label.categorie-optie {
         <?php echo csrfVeld(); ?>
         <input type="hidden" name="actie" value="opslaan_scanpad">
 
-        <label for="extra_scan_pad_negeren">Nog extra (sub)mapnamen overslaan (optioneel, kommagescheiden)</label>
+        <label for="extra_scan_pad_negeren">Nog extra (sub)mapnamen overslaan (optioneel, kommagescheiden)<?php echo hulpIcoon('scanpad-overslaan', 'Mapnamen in de accountroot of naast de site (bijv. in public_html) die het extra scanpad bij deze site niet hoeft te doorzoeken. Systeemmappen van de hostingpartij, andere sites in domains en andere Joomla-installaties naast de site worden al automatisch overgeslagen.'); ?></label>
         <input type="text" name="extra_scan_pad_negeren" id="extra_scan_pad_negeren"
             value="<?php echo htmlspecialchars($site['extra_scan_pad_negeren'] ?? ''); ?>"
             placeholder="mapnamen, gescheiden door een komma">
         <div class="uitleg" style="margin-top: 8px;">
-            Herkenbare hostingpartij-systeemmappen (bijv. <code>Maildir</code>, <code>.cagefs</code>, <code>.pki</code>,
-            <code>.php</code>) worden al automatisch overgeslagen - daar hoef je hier dus niets voor in te vullen.
+            Herkenbare hostingpartij-systeemmappen (bijv. <code>Maildir</code>, <code>.pki</code>, <code>.php</code>)
+            worden al automatisch overgeslagen - daar hoef je hier dus niets voor in te vullen. Ook mappen die niet van
+            dit hostingaccount zijn en waarin het account niet kan schrijven (zoals de systeemkopieën van PHP in
+            <code>.cagefs</code>) worden overgeslagen; <code>.cagefs/tmp</code> zelf wordt wel gewoon gescand.
             Ook <code>domains</code> wordt automatisch overgeslagen, zodat je andere sites (die toch al apart en
             volledig via hun eigen monitor-item worden gescand) niet nog een keer meegescand worden. Dit veld is
             alleen nog voor mappen die je zelf, specifiek bij deze site, ook nog wilt overslaan.
+        </div>
+
+        <label for="root_negeer_patronen" style="margin-top: 14px; display: block;">Onbekende items in de website-root niet melden (optioneel, kommagescheiden patronen)<?php echo hulpIcoon('root-negeer-patronen', 'Patronen zoals sitemap*.xml voor bekende bestanden of mappen in de website-root die steeds veranderen. Verbergt alleen de melding onbekend item; PHP-bestanden worden altijd gemeld.'); ?></label>
+        <input type="text" name="root_negeer_patronen" id="root_negeer_patronen"
+            value="<?php echo htmlspecialchars($site['root_negeer_patronen'] ?? ''); ?>"
+            placeholder="bijv. sitemap*.xml, catalogi">
+        <div class="uitleg" style="margin-top: 8px;">
+            Voor bestanden of mappen in de website-root die je kent en die steeds veranderen, zoals sitemaps die een
+            extensie elke nacht opnieuw schrijft. <code>*</code> staat voor willekeurige tekens, <code>?</code> voor één teken.
+            Dit verbergt alleen de melding "onbekend item": de inhoud van zo'n map wordt gewoon doorzocht, en een
+            PHP-bestand (of ander uitvoerbaar bestand) wordt altijd gemeld, ook als het onder een patroon valt.
+            Na opslaan werkt het scanscript op de site zichzelf bij de volgende scan bij.
         </div>
 
         <button type="submit" class="knop opslaan">Opslaan</button>

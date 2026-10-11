@@ -243,9 +243,20 @@ function haalScanVoortgangUitItems(array &$items): ?array
             $bovengrens = $m[1] !== '';
         }
 
+        // Welke grens het scanscript bereikte: het noemt die letterlijk in de reden ("het maximale aantal bestanden
+        // (150.000)" of "de maximale scantijd (45 seconden, ...)"). Bij het aantal komt een vervolgscan niet verder:
+        // ook een bestand dat het inhoudsgeheugen overslaat, telt mee.
+        $oorzaak = null;
+        if (stripos($reden, 'maximale aantal bestanden') !== false) {
+            $oorzaak = 'aantal';
+        } elseif (stripos($reden, 'maximale scantijd') !== false) {
+            $oorzaak = 'tijd';
+        }
+
         $voortgang = [
             'procent' => $procent,
             'bovengrens' => $bovengrens,
+            'oorzaak' => $oorzaak,
             'reden' => $reden,
             'gewijzigd' => (string) ($item['gewijzigd'] ?? ''),
         ];

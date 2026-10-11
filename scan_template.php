@@ -2426,7 +2426,7 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         return;
     }
 
-    if (!is_readable($bestandpad)) {
+    if (!@is_readable($bestandpad)) {
         return;
     }
 
@@ -3095,7 +3095,7 @@ function isBekendGoedaardigeHtaccess(string $inhoud): bool
 
 function scanHtaccessVoorMalware($bestandpad, &$vondsten, $startMap, bool $isWebrootMap = false)
 {
-    if (!is_readable($bestandpad)) {
+    if (!@is_readable($bestandpad)) {
         return;
     }
 
@@ -3251,7 +3251,7 @@ function isXmlAchtigeProcessingInstructie(string $inhoud, int $tagPositie): bool
  */
 function scanNietPhpBestandOpVerstopteCode($bestandpad, &$backdoorVondsten, &$mogelijkLegitiem, $ignoreerBestanden, $startMap)
 {
-    if (!is_readable($bestandpad)) {
+    if (!@is_readable($bestandpad)) {
         return;
     }
 
@@ -3438,7 +3438,7 @@ function isBekendeLegitiemeLibrary(string $volledigPad, string $startMap): bool
 
     // Niet uitleesbaar of onverwacht groot: nooit blind overslaan.
     $grootte = @filesize($volledigPad);
-    if ($grootte === false || $grootte > 2 * 1024 * 1024 || !is_readable($volledigPad)) {
+    if ($grootte === false || $grootte > 2 * 1024 * 1024 || !@is_readable($volledigPad)) {
         return false;
     }
 
@@ -3738,6 +3738,34 @@ const SCAN_TELBUDGET_SECONDEN = 15;
  * Telt één resterend item mee, en bij een map ook alles daaronder. Geeft false terug als de telling is gestopt
  * (eigen tijdsgrens op) - de aanroeper stopt dan ook.
  */
+/**
+ * True voor een map BUITEN de website (in het extra scanpad) die niet van het hostingaccount zelf is en waarin het
+ * account ook niet kan schrijven - bijv. CloudLinux' kopieën van alle PHP-versies in .cagefs/opt/alt/php44 t/m php84,
+ * die van root zijn. Een aanvaller die als dit account draait, kan daar niets neerzetten, dus doorzoeken heeft geen zin;
+ * het kost alleen het scanbudget (aanleiding oktober 2026: ruim 160.000 items in de accountroot, steeds gestopt op 92%).
+ * Mappen van het account zelf (zoals .cagefs/tmp, waar eerder echte achterdeuren stonden) blijven gewoon meegescand.
+ * Herkend aan eigenaar + schrijfbaarheid, niet aan naam.
+ */
+function isNietDoorAccountBeschrijfbareMap(string $pad, string $startMap): bool
+{
+    static $accountUid = null;
+    if ($accountUid === null) {
+        $accountUid = @fileowner($startMap);
+    }
+    if ($accountUid === false || strpos($pad, rtrim($startMap, '/') . '/') === 0) {
+        return false;
+    }
+    $eigenaar = @fileowner($pad);
+    if ($eigenaar === false || $eigenaar === $accountUid) {
+        return false;
+    }
+    if (@is_writable($pad)) {
+        return false;
+    }
+    $GLOBALS['scanVreemdeMappenOvergeslagen'] = ($GLOBALS['scanVreemdeMappenOvergeslagen'] ?? 0) + 1;
+    return true;
+}
+
 function telResterendItem(string $volledigPad, string $startMap, int $diepte): bool
 {
     static $telStart = null;
@@ -3755,7 +3783,8 @@ function telResterendItem(string $volledigPad, string $startMap, int $diepte): b
 
     $GLOBALS['scanResterendeItems'] = ($GLOBALS['scanResterendeItems'] ?? 0) + 1;
 
-    if (!is_dir($volledigPad)) {
+    // @: een symlink die buiten open_basedir wijst gaf hier een waarschuwing in de scanuitvoer.
+    if (!@is_dir($volledigPad)) {
         return true;
     }
     $werkelijk = @realpath($volledigPad);
@@ -3763,9 +3792,15 @@ function telResterendItem(string $volledigPad, string $startMap, int $diepte): b
     if ($werkelijk !== false && $werkelijkeStart !== false && $werkelijk === $werkelijkeStart) {
         return true;
     }
+    // Zelfde overslagregel als scanRecursief(), anders klopt het percentage niet. Niet nog eens meetellen.
+    $aantalVoor = $GLOBALS['scanVreemdeMappenOvergeslagen'] ?? 0;
+    if (isNietDoorAccountBeschrijfbareMap($volledigPad, $startMap)) {
+        $GLOBALS['scanVreemdeMappenOvergeslagen'] = $aantalVoor;
+        return true;
+    }
 
     // Zelfde dieptegrens als scanRecursief(): die wordt voor deze map aangeroepen met $diepte + 1 en stopt boven 10.
-    if ($diepte + 1 > 10 || !is_readable($volledigPad)) {
+    if ($diepte + 1 > 10 || !@is_readable($volledigPad)) {
         return true;
     }
     $items = @scandir($volledigPad);
@@ -3869,13 +3904,27 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         return;
     }
 
-    if (!is_readable($pad)) {
+    if (!@is_readable($pad)) {
         return;
     }
 
     $items = @scandir($pad);
     if ($items === false) {
         return;
+    }
+
+    // In de website-root tmp/ als EERSTE scannen. De tmp-map wordt vlak voor de scan geleegd
+    // (legeTmpMapAutomatisch()); omdat tmp/ alfabetisch bijna achteraan kwam, had een bezoeker op een trage server
+    // tientallen seconden de tijd om er alweer een tijdelijk bestand in te laten zetten (bv. Regular Labs:
+    // tmp/regularlabs/custom_php/<nummer>_<hash>, PHP zonder extensie), dat dan als verdacht werd gemeld. Direct na
+    // het legen scannen maakt dat venster vrijwel nul, zonder iets in tmp/ uit te zonderen: wat er dan toch staat,
+    // stond er al of kwam er in die fractie van een seconde bij, en wordt gewoon gemeld.
+    if ($diepte === 0 && @realpath($pad) === @realpath($startMap)) {
+        $tmpPositie = array_search('tmp', $items, true);
+        if ($tmpPositie !== false) {
+            unset($items[$tmpPositie]);
+            array_unshift($items, 'tmp');
+        }
     }
 
     foreach ($items as $item) {
@@ -3929,13 +3978,18 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         // servers aan met 666, en elke nieuwe back-up gaf zo weer een nieuwe melding. Zie isAkeebaBackupArchiefVanDezeSite().
         if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector
             && !isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
-            $afwijking = controleerBestandsrechten($volledigPad, is_dir($volledigPad));
+            $afwijking = controleerBestandsrechten($volledigPad, @is_dir($volledigPad));
             if ($afwijking !== null) {
                 $rechtenAfwijkingen[] = $afwijking;
             }
         }
 
-        if (is_dir($volledigPad)) {
+        if (@is_dir($volledigPad)) {
+            // Map buiten de website die niet van dit account is en waarin het niet kan schrijven: overslaan, zie
+            // isNietDoorAccountBeschrijfbareMap().
+            if (isNietDoorAccountBeschrijfbareMap($volledigPad, $startMap)) {
+                continue;
+            }
             // Bij sommige hostingpartijen (bijv. Vimexx) is "private_html"
             // een symlink die naar exact dezelfde fysieke locatie wijst als
             // de gewone website-root ("public_html") - beide mappen tonen
@@ -4478,6 +4532,28 @@ function checkExtraScanpadTopNiveau($extraRoot, &$rootUnknown, array $negeren, $
 // CHECK ROOT-LEVEL ONBEKENDE MAPPEN & BESTANDEN
 // ============================================================================
 
+/**
+ * Eigen uitsluitpatronen per site (site-instellingen, veld "Onbekende items in de website-root niet melden"), bv.
+ * "sitemap*.xml" voor een sitemapgenerator die elke nacht zestig nieuwe bestanden in de root schrijft. Werkt alleen op
+ * de melding "onbekend item" in de website-root: de inhoud van een map wordt gewoon doorzocht, en een PHP-uitvoerbaar
+ * bestand valt er nooit onder (zie checkRootLevel()). Patronen zoals in de bestandsbeheerder: * en ?, hoofdletterongevoelig.
+ */
+function matchtEigenRootPatroon(string $naam): bool
+{
+    static $patronen = null;
+    if ($patronen === null) {
+        $ruw = '__ROOT_NEGEER_PATRONEN__';
+        $patronen = ($ruw === '__ROOT' . '_NEGEER_PATRONEN__') ? [] : array_values(array_filter(array_map('trim', explode(',', $ruw))));
+    }
+    foreach ($patronen as $patroon) {
+        if (fnmatch(strtolower($patroon), strtolower($naam))) {
+            $GLOBALS['rootNegeerPatroonAantal'] = ($GLOBALS['rootNegeerPatroonAantal'] ?? 0) + 1;
+            return true;
+        }
+    }
+    return false;
+}
+
 function checkRootLevel($pad, &$rootUnknown, $vertrouwdeMappen, $ignoreerBestanden, $vertrouwdeBestanden, $naamPrefix = '')
 {
     $items = @scandir($pad);
@@ -4524,6 +4600,10 @@ function checkRootLevel($pad, &$rootUnknown, $vertrouwdeMappen, $ignoreerBestand
             }
 
             // Root-level onbekende map
+            if (matchtEigenRootPatroon($naamPrefix . $item)) {
+                continue;
+            }
+
             $rootUnknown[] = [
                 'type' => 'map',
                 'naam' => $naamPrefix . $item,
@@ -4626,6 +4706,10 @@ function checkRootLevel($pad, &$rootUnknown, $vertrouwdeMappen, $ignoreerBestand
                 }
 
                 $isUitvoerbaar = (bool) preg_match('/\.(php\d?|phtml|phar|cgi|pl|sh)$/i', $item);
+                // Eigen uitsluitpatroon uit de site-instellingen - nooit voor een uitvoerbaar bestand.
+                if (!$isUitvoerbaar && matchtEigenRootPatroon($naamPrefix . $item)) {
+                    continue;
+                }
                 $rootUnknown[] = [
                     'type' => 'bestand',
                     'naam' => $naamPrefix . $item,
@@ -6072,7 +6156,7 @@ if (!$extraScanIngeschakeld) {
         for ($i = 0; $i < count($ketenDelen) - 1; $i++) {
             $tussenPad .= '/' . $ketenDelen[$i];
             $volgendeStap = $ketenDelen[$i + 1];
-            if (!is_dir($tussenPad) || !is_readable($tussenPad)) {
+            if (!@is_dir($tussenPad) || !@is_readable($tussenPad)) {
                 break;
             }
             $binnenWebroot = $binnenWebroot
@@ -6094,7 +6178,7 @@ if (!$extraScanIngeschakeld) {
             $volgendeStapEcht = @realpath($tussenPad . '/' . $volgendeStap);
             foreach ($tussenItems as $tussenItem) {
                 $sub = $tussenPad . '/' . $tussenItem;
-                if ($tussenItem === '.' || $tussenItem === '..' || $tussenItem === $volgendeStap || !is_dir($sub)) {
+                if ($tussenItem === '.' || $tussenItem === '..' || $tussenItem === $volgendeStap || !@is_dir($sub)) {
                     continue;
                 }
                 if ($volgendeStapEcht !== false && @realpath($sub) === $volgendeStapEcht) {
@@ -6111,7 +6195,7 @@ if (!$extraScanIngeschakeld) {
             // met alle losse bestanden van dit niveau op de negeerlijst zodat niets dubbel wordt gemeld.
             $tussenBestanden = [];
             foreach ($tussenItems as $tussenItem) {
-                if ($tussenItem !== '.' && $tussenItem !== '..' && is_file($tussenPad . '/' . $tussenItem)) {
+                if ($tussenItem !== '.' && $tussenItem !== '..' && @is_file($tussenPad . '/' . $tussenItem)) {
                     $tussenBestanden[] = $tussenItem;
                 }
             }
@@ -6120,7 +6204,7 @@ if (!$extraScanIngeschakeld) {
             foreach ($tussenBestanden as $tussenItem) {
                 $tb = $tussenPad . '/' . $tussenItem;
                 $tussenOverzicht[] = $tussenItem . ' (' . (int) @filesize($tb) . ' b, ' . substr(sprintf('%o', (int) @fileperms($tb)), -4)
-                    . (is_readable($tb) ? '' : ', NIET LEESBAAR') . ')';
+                    . (@is_readable($tb) ? '' : ', NIET LEESBAAR') . ')';
             }
             echo 'Tussenniveau ' . $tussenPad . ($binnenWebroot ? ' (webroot)' : '') . ': '
                 . (empty($tussenOverzicht) ? 'geen losse bestanden' : implode(', ', $tussenOverzicht))
@@ -6148,7 +6232,7 @@ if (!$extraScanIngeschakeld) {
             $alGemeld = array_column($backdoorVondsten, 'bestandspad');
             foreach ($tussenItems as $tussenItem) {
                 $tussenBestand = $tussenPad . '/' . $tussenItem;
-                if ($tussenItem === '.' || $tussenItem === '..' || !is_file($tussenBestand)
+                if ($tussenItem === '.' || $tussenItem === '..' || !@is_file($tussenBestand)
                     || !isPhpUitvoerbareExtensie($tussenItem) || in_array($tussenBestand, $alGemeld, true)) {
                     continue;
                 }
@@ -6195,7 +6279,7 @@ if (!$extraScanIngeschakeld) {
         $alGemeld = array_column($backdoorVondsten, 'bestandspad');
         foreach (@scandir($extraScanRootAbsoluut) ?: [] as $rootItem) {
             $rootBestand = $extraScanRootAbsoluut . '/' . $rootItem;
-            if ($rootItem === '.' || $rootItem === '..' || in_array($rootItem, $extraScanPadNegeren, true) || !is_file($rootBestand)
+            if ($rootItem === '.' || $rootItem === '..' || in_array($rootItem, $extraScanPadNegeren, true) || !@is_file($rootBestand)
                 || !isPhpUitvoerbareExtensie($rootItem) || in_array($rootBestand, $alGemeld, true)) {
                 continue;
             }
@@ -6241,6 +6325,14 @@ echo 'Inhoudsgeheugen: ' . number_format($inhoudsgeheugen['overgeslagen'], 0, ',
     . number_format($inhoudsgeheugen['gecontroleerd'], 0, ',', '.') . ' op inhoud gecontroleerd in '
     . number_format($inhoudsgeheugen['seconden'], 1, ',', '.') . ' s'
     . ($inhoudsgeheugen['melding'] !== '' ? ' - ' . $inhoudsgeheugen['melding'] : '') . ".\n";
+if (!empty($GLOBALS['rootNegeerPatroonAantal'])) {
+    echo 'Volgens de site-instellingen niet als onbekend gemeld: ' . number_format($GLOBALS['rootNegeerPatroonAantal'], 0, ',', '.')
+        . " item(s) in de website-root.\n";
+}
+if (!empty($GLOBALS['scanVreemdeMappenOvergeslagen'])) {
+    echo 'Buiten de website overgeslagen: ' . number_format($GLOBALS['scanVreemdeMappenOvergeslagen'], 0, ',', '.')
+        . " map(pen) die niet van dit hostingaccount zijn en waarin het account niet kan schrijven (bv. systeemkopieën van PHP in .cagefs).\n";
+}
 
 if (!empty($GLOBALS['scanBudgetOp'])) {
     // Percentage in een vaste vorm ("38% van de bestanden bekeken", of "hoogstens 38% ..."), zodat de monitor het uit

@@ -21,6 +21,8 @@ function genereerScanScriptInhoud(PDO $pdo, ?array $site = null): string
     $monitorUrl  = rtrim(haalInstelling($pdo, 'monitor_basis_url', ''), '/');
     $extraScanPad = $site !== null ? trim($site['extra_scan_pad'] ?? '') : '';
     $extraScanPadNegeren = $site !== null ? trim($site['extra_scan_pad_negeren'] ?? '') : '';
+    // Alleen veilige tekens: het patroon komt letterlijk tussen enkele aanhalingstekens in de PHP-code van het scanscript.
+    $rootNegeerPatronen = $site !== null ? preg_replace('/[^A-Za-z0-9._*?, \/-]/', '', (string) ($site['root_negeer_patronen'] ?? '')) : '';
 
     $sjabloonPad = __DIR__ . '/scan_template.php';
 
@@ -33,6 +35,7 @@ function genereerScanScriptInhoud(PDO $pdo, ?array $site = null): string
     $inhoud = str_replace('__MONITOR_BASIS_URL__', $monitorUrl, $inhoud);
     $inhoud = str_replace('__EXTRA_SCAN_PAD__', $extraScanPad, $inhoud);
     $inhoud = str_replace('__EXTRA_SCAN_PAD_NEGEREN__', $extraScanPadNegeren, $inhoud);
+    $inhoud = str_replace('__ROOT_NEGEER_PATRONEN__', $rootNegeerPatronen, $inhoud);
 
     return $inhoud;
 }

@@ -34,6 +34,16 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 require_once 'config.php';
+// Database-migraties ook hier uitvoeren, niet alleen vanuit config.php. config.php staat niet in de repo en wordt bij
+// een update niet vervangen; een oudere config.php (van vóór de automatische migraties, of handmatig aangemaakt) roept
+// voerAutoMigratieUit() niet aan, waardoor geen enkele nieuwe migratiestap werd uitgevoerd (aanleiding: een installatie
+// die op stap 18 bleef staan, zonder de MEDIUMTEXT-kolom van stap 24). Dubbel aanroepen kost alleen één query.
+require_once 'auto_migratie.php';
+try {
+    voerAutoMigratieUit($pdo);
+} catch (\Throwable $e) {
+    die('FOUT bij het automatisch bijwerken van de database: ' . htmlspecialchars($e->getMessage()));
+}
 require_once 'versie.php';
 require_once 'csrf_functies.php';
 require_once 'verdacht_functies.php';

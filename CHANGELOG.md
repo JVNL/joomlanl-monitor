@@ -1,5 +1,47 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.34 - 2026-10-09
+
+### Scanscript: systeemmappen buiten de website die niet van het account zijn, overgeslagen (`scan_template.php`, `site_instellingen.php`)
+Op een account met CloudLinux staan in `.cagefs/opt/alt/` kopieën van alle beschikbare PHP-versies, elk met duizenden bestanden. Die telden mee voor het maximale aantal bestanden van de scan (150.000). Op zo'n account stopte de scan daardoor steeds op dezelfde plek (bijvoorbeeld 92%), ook als het inhoudsgeheugen vrijwel alles oversloeg: een overgeslagen bestand telt nog steeds mee.
+
+- **Een map buiten de website die niet van het hostingaccount is en waarin het account niet kan schrijven, wordt niet meer doorzocht** (`isNietDoorAccountBeschrijfbareMap()`). Een aanvaller die als dit account draait, kan daar niets neerzetten. Herkend aan eigenaar en schrijfrechten, niet aan naam.
+- Mappen van het account zelf blijven gewoon meegescand, ook binnen `.cagefs` (bijvoorbeeld `.cagefs/tmp`, waar eerder echte achterdeuren stonden).
+- Dezelfde regel geldt bij het tellen van de resterende bestanden, zodat het percentage bij een onvolledige scan klopt.
+- De ruwe scanuitvoer meldt hoeveel van zulke mappen zijn overgeslagen.
+- De uitleg bij het extra scanpad in de site-instellingen noemde `.cagefs` nog als automatisch overgeslagen; dat klopte al sinds 1.32 niet meer en is aangepast.
+
+### Beveiligingsrapport: balk "Onvolledige scan" noemt welke grens bereikt is (`verdacht_functies.php`, `beveiliging.php`)
+De balk zei steeds "de maximale scantijd of het maximale aantal bestanden", terwijl het scanscript in de melding precies noemt welke van de twee het was. Dat verschil doet ertoe: bij de tijd komt een vervolgscan verder, bij het aantal niet (ook een bestand dat het inhoudsgeheugen overslaat, telt mee).
+
+- **Maximale aantal bestanden:** de balk zegt dat opnieuw scannen niet helpt, en raadt aan overbodige bestanden op te ruimen (bijvoorbeeld een back-upmap die een extensie zelf aanmaakt) of grote mappen uit te sluiten.
+- **Maximale scantijd:** de balk zegt dat een vervolgscan verder komt, vooral na een update van het scanscript.
+- Een melding van een ouder scanscript zonder die vermelding houdt de oude, algemene tekst.
+
+### Database-migraties ook vanaf de monitorpagina (`index.php`)
+De automatische migraties werden alleen vanuit `config.php` gestart. Dat bestand staat niet in de repo en wordt bij een update niet vervangen; in een oudere `config.php` ontbrak de aanroep, waardoor op zo'n installatie geen enkele nieuwe migratiestap werd uitgevoerd. Daardoor ontbrak bijvoorbeeld de grotere opslag voor de vondstenlijst uit 1.32, en gaf het opslaan van de site-instellingen een fout.
+
+- De monitorpagina voert de migraties nu ook zelf uit. Openen van de monitorpagina is genoeg om een achterlopende database bij te werken.
+
+### Scanscript: `tmp/` direct na het legen scannen (`scan_template.php`)
+De tmp-map wordt aan het begin van elke scan geleegd, maar kwam in de scanvolgorde bijna als laatste aan de beurt. Op een trage server had een bezoeker daardoor tientallen seconden de tijd om er alweer een tijdelijk bestand in te laten zetten, dat dan als verdacht werd gemeld (bijvoorbeeld een PHP-bestand zonder extensie van een extensie die eigen PHP-code uitvoert).
+
+- `tmp/` wordt nu als eerste map van de website gescand, direct na het legen. Het venster is daarmee vrijwel nul.
+- Er wordt niets in `tmp/` uitgezonderd: wat er op dat moment staat, wordt gewoon gemeld.
+
+### Scanscript: geen PHP-waarschuwingen meer in de scanuitvoer bij `open_basedir` (`scan_template.php`)
+- Een symlink die buiten de `open_basedir`-grens wijst (bijvoorbeeld in `awstats`, of de database-sockets in `.cagefs/tmp`) gaf bij het tellen van de resterende bestanden, bij de tussenniveaus en bij het inlezen een PHP-waarschuwing in de scanuitvoer. Die controles zijn nu stil.
+
+### Site-instellingen: onbekende items in de website-root per site uitsluiten (`site_instellingen.php`, `genereer_scanscript_functies.php`, `scan_template.php`, `auto_migratie.php`, `help.php`)
+Een site waarvan een extensie elke nacht tientallen sitemapbestanden in de root opnieuw schrijft, gaf elke scan dezelfde rij "onbekend item"; vertrouwen hielp niet, want de inhoud verandert elke nacht.
+
+- **Nieuw veld "Onbekende items in de website-root niet melden"**: kommagescheiden patronen, bijvoorbeeld `sitemap*.xml`. `*` staat voor willekeurige tekens, `?` voor één teken, hoofdletterongevoelig.
+- Het verbergt alleen de melding "onbekend item". De inhoud van een map die eronder valt wordt gewoon doorzocht, en een PHP- of ander uitvoerbaar bestand wordt altijd gemeld, ook als het onder een patroon valt.
+- Na opslaan werkt het scanscript op de site zichzelf bij de volgende scan bij. De ruwe scanuitvoer meldt hoeveel items op deze manier niet zijn gemeld.
+- Beide uitsluitvelden in de site-instellingen hebben een ?-hulpknop, met uitleg in de helppagina (hoofdstuk 4).
+- Na het opslaan van het extra scanpad meldde de pagina nog dat het scanscript opnieuw via FTP moest worden verstuurd. Dat is sinds het zelf-bijwerkende scanscript niet meer nodig; de melding zegt dat nu.
+- **Migratiestap 25** voegt hiervoor de kolom `root_negeer_patronen` toe; dat gebeurt automatisch. De site-instellingen maken de kolom ook zelf aan als die ontbreekt, zodat opslaan niet meer met "Unknown column" vastloopt op een installatie waar de stap niet is uitgevoerd.
+
 ## 1.33 - 2026-10-08
 
 ### Scanscript: inhoudsgeheugen, zodat een trage server de scan toch afmaakt (`scan_template.php`, `help.php`)

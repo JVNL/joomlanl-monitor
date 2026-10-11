@@ -39,6 +39,18 @@ function kolomBestaat(PDO $pdo, string $tabel, string $kolom): bool
 }
 
 /**
+ * Kolom voor de eigen uitsluitpatronen per site (migratiestap 25). Ook los aangeroepen vanuit site_instellingen.php
+ * vóór het opslaan: op een installatie waar stap 25 niet is uitgevoerd (bijv. omdat schema_versie daar al een hoger
+ * nummer had door eigen tussenstappen), gaf opslaan anders een fatale fout "Unknown column".
+ */
+function zorgVoorRootNegeerPatronenKolom(PDO $pdo): void
+{
+    if (!kolomBestaat($pdo, 'sites', 'root_negeer_patronen')) {
+        $pdo->exec("ALTER TABLE `sites` ADD COLUMN `root_negeer_patronen` TEXT NULL AFTER `extra_scan_pad_negeren`");
+    }
+}
+
+/**
  * Genummerde migratiestappen. Elke stap krijgt de $pdo-verbinding mee, en
  * moet zelf idempotent zijn (mag geen fout geven als 'm per ongeluk twee
  * keer draait).
@@ -547,6 +559,15 @@ function haalMigraties(): array
             if ($type !== '' && $type !== 'mediumtext' && $type !== 'longtext') {
                 $pdo->exec("ALTER TABLE `sites` MODIFY `verdacht_details` MEDIUMTEXT NULL DEFAULT NULL");
             }
+        },
+
+        // ----------------------------------------------------------------
+        // Stap 25 (versie 1.34): eigen uitsluitpatronen per site voor de
+        // melding "onbekend item" in de website-root (bv. "sitemap*.xml"),
+        // zie matchtEigenRootPatroon() in scan_template.php.
+        // ----------------------------------------------------------------
+        25 => function (PDO $pdo) {
+            zorgVoorRootNegeerPatronenKolom($pdo);
         },
 
     ];

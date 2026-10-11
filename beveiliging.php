@@ -969,13 +969,26 @@ tr.groep-kop { background: var(--thema-kader-bg); }
         <div class="scan-voortgang-vulling" style="width: <?php echo (int) $voortgangProcent; ?>%;"></div>
     </div>
     <?php endif; ?>
+    <?php $bijPad = $gestoptBij !== '' ? ', bij <code>' . htmlspecialchars($gestoptBij) . '</code>' : ''; ?>
     <div class="scan-voortgang-uitleg">
-        De laatste scan heeft niet alle bestanden kunnen bekijken: de maximale scantijd of het maximale aantal bestanden was bereikt<?php
-        echo $gestoptBij !== '' ? ', bij <code>' . htmlspecialchars($gestoptBij) . '</code>' : ''; ?>. Wat daarna komt, is nog niet op
-        verdachte inhoud gecontroleerd. <strong>Deze site is pas volledig gecontroleerd als deze balk na een scan niet meer verschijnt.</strong>
-        Een vervolgscan slaat bestanden over die al zijn gecontroleerd en sindsdien niet zijn gewijzigd, en komt daardoor verder;
-        meestal zijn er een of twee nodig. Blijft het percentage gelijk, ruim dan onnodige bestanden op, of sluit grote mappen buiten
-        de website uit via de site-instellingen.
+        <?php if (($scanVoortgang['oorzaak'] ?? null) === 'aantal'): ?>
+        De laatste scan heeft niet alle bestanden kunnen bekijken: het <strong>maximale aantal bestanden</strong> was bereikt<?php echo $bijPad; ?>.
+        Wat daarna komt, is nog niet op verdachte inhoud gecontroleerd. <strong>Opnieuw scannen helpt hier niet:</strong> ook bestanden
+        die al gecontroleerd zijn, tellen mee voor die grens, dus elke scan stopt weer rond dezelfde plek. Ruim overbodige bestanden op
+        (bijvoorbeeld een back-upmap die een extensie zelf aanmaakt, zoals reservekopieën van geoptimaliseerde afbeeldingen), of sluit
+        grote mappen buiten de website uit via de site-instellingen.
+        <?php elseif (($scanVoortgang['oorzaak'] ?? null) === 'tijd'): ?>
+        De laatste scan heeft niet alle bestanden kunnen bekijken: de <strong>maximale scantijd</strong> was bereikt<?php echo $bijPad; ?>.
+        Wat daarna komt, is nog niet op verdachte inhoud gecontroleerd. <strong>Deze site is pas volledig gecontroleerd als deze balk na een
+        scan niet meer verschijnt.</strong> Een vervolgscan slaat bestanden over die al zijn gecontroleerd en sindsdien niet zijn gewijzigd,
+        en komt daardoor verder; meestal zijn er een of twee nodig, vooral na een update van het scanscript.
+        <?php else: ?>
+        De laatste scan heeft niet alle bestanden kunnen bekijken: de maximale scantijd of het maximale aantal bestanden was bereikt<?php echo $bijPad; ?>.
+        Wat daarna komt, is nog niet op verdachte inhoud gecontroleerd. <strong>Deze site is pas volledig gecontroleerd als deze balk na een
+        scan niet meer verschijnt.</strong> Een vervolgscan slaat bestanden over die al zijn gecontroleerd en sindsdien niet zijn gewijzigd,
+        en komt daardoor verder; meestal zijn er een of twee nodig. Blijft het percentage gelijk, ruim dan onnodige bestanden op, of sluit
+        grote mappen buiten de website uit via de site-instellingen.
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>

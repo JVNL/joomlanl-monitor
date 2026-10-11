@@ -450,6 +450,33 @@ th {
         💡 <strong>Bewust wél meegescand:</strong> <code>.cagefs</code> en <code>.cl.selector</code> (CloudLinux-
         systeemmappen) staan expres niet op de standaard-uitsluitlijst. Die zijn vaak wereld-schrijfbaar en worden
         zelden gecontroleerd - en dus in de praktijk een populaire plek gebleken voor een geplaatste backdoor.
+        Wat daarbinnen wél wordt overgeslagen: mappen die niet van het hostingaccount zelf zijn én waarin het
+        account niet kan schrijven, zoals de kopieën van alle PHP-versies in <code>.cagefs/opt/alt/</code>. Een
+        aanvaller die als dit account draait, kan daar niets neerzetten; zonder die regel haalden zulke accounts
+        steeds de maximale hoeveelheid bestanden van de scan. <code>.cagefs/tmp</code> is van het account zelf en
+        wordt gewoon gescand.
+    </div>
+    <h3 id="scanpad-overslaan">Nog extra (sub)mapnamen overslaan</h3>
+    <p>Mapnamen, kommagescheiden, die het extra scanpad bij déze site niet hoeft te doorzoeken - bijvoorbeeld een
+    grote eigen back-upmap naast de website. Het geldt voor mappen direct in de accountroot én voor mappen op de
+    tussenliggende niveaus tussen accountroot en website (bijvoorbeeld een map naast de site in
+    <code>public_html</code>, als de site zelf in een submap staat). Niet voor mappen binnen de website zelf.</p>
+    <p>De systeemmappen van de hostingpartij, andere sites in <code>domains</code>, de mappen die niet van het
+    account zijn (zie hierboven) en andere Joomla-installaties naast de site (een map met een eigen
+    <code>configuration.php</code> en <code>administrator</code>-map) worden al automatisch overgeslagen; daarvoor
+    hoef je hier niets in te vullen. Welke andere installaties zijn overgeslagen, staat in de ruwe scanuitvoer bij
+    de regel "Tussenniveau".</p>
+    <h3 id="root-negeer-patronen">Onbekende items in de website-root niet melden</h3>
+    <p>Voor bestanden of mappen in de website-root die je kent en die steeds veranderen, zodat vertrouwen niet
+    helpt - bijvoorbeeld een sitemapgenerator die elke nacht tientallen <code>sitemap-*.xml</code>-bestanden opnieuw
+    schrijft. Vul kommagescheiden patronen in: <code>*</code> staat voor willekeurige tekens, <code>?</code> voor
+    één teken, hoofdletters maken niet uit. Voorbeeld: <code>sitemap*.xml, catalogi</code>.</p>
+    <div class="tip">
+        💡 Dit verbergt alleen de melding "onbekend item" in de website-root. De inhoud van een map die onder een
+        patroon valt, wordt gewoon doorzocht, en een PHP-bestand (of ander uitvoerbaar bestand) wordt altijd gemeld,
+        ook als de naam onder een patroon valt. Het werkt alleen op namen direct in de website-root, niet op
+        paden dieper in de site. Na opslaan werkt het scanscript op de site zichzelf bij bij de volgende scan; de
+        ruwe scanuitvoer meldt hoeveel items op deze manier niet zijn gemeld.
     </div>
     <div class="tip">
         💡 Krijg je toch nog tientallen of honderden meldingen met "Afwijkende rechten" als reden, allemaal binnen

@@ -1,5 +1,32 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.35 - 2026-10-18
+
+### Updates van los verspreide Joomla-project-extensies werden niet gemeld (`scan_template.php`, `versie_vergelijk_functies.php`, `ontvang_scan.php`, `extensie_beheer.php`)
+Een extensie werd als Joomla-kernonderdeel gezien zodra de auteur in het manifest "Joomla! Project" was. Het Joomla-project brengt echter ook extensies uit die niet met de kern meekomen, maar los worden geïnstalleerd en via een eigen update-feed worden bijgewerkt. Een Joomla-kernupdate werkt die niet bij. Het scanscript sloeg hun update-feed toch over en het extensieoverzicht hield ze buiten beeld, waardoor een beschikbare update die Joomla zelf onder "Extensies: Updaten" wel toonde, in de monitor niet verscheen.
+
+- **Een extensie met auteur "Joomla! Project" én een eigen update-feed buiten joomla.org telt nu als extensie van derden.** Het scanscript haalt de feed op en de extensie verschijnt in het extensieoverzicht, met de gewone update-status.
+- Herkend aan de update-feed, niet aan naam. Echte kernonderdelen hebben geen eigen feed, of een feed op een server van joomla.org; die blijven ongewijzigd buiten het overzicht.
+- Dezelfde regel staat in het scanscript en op de monitor (`isLosVerspreideJoomlaProjectExtensie()`). Alle plekken die bepalen of iets een kernonderdeel is, lezen daarvoor nu ook de feed-URL uit.
+- Het scanscript werkt zichzelf bij de eerstvolgende scan bij; die scan toont de extensie al met de juiste status.
+
+### Feed met alleen ontwikkelversies gaf "Onbekend" (`scan_template.php`, `feed_terugval_functies.php`)
+Bevat een update-feed wel versieregels, maar uitsluitend ontwikkelversies (`-dev`, `-alpha`, `-beta`, `-rc`), dan bleef na het stabiliteitsfilter niets over en kreeg de extensie de status "Onbekend". Er is dan echter gewoon geen nieuwere stabiele versie; Joomla zelf biedt ook geen update aan.
+
+- **De geïnstalleerde versie geldt in dat geval als nieuwste stabiele versie**, met status "Up-to-date". Verschijnt er later een stabiele versie in de feed, dan wordt die gewoon als update gemeld.
+- Alleen als de feed daadwerkelijk versieregels bevat en de geïnstalleerde versie zelf stabiel is. Een lege, onbereikbare of onleesbare feed blijft "Onbekend", en taalbestanden (met hun kernversiegrens) vallen erbuiten.
+- De ruwe scanuitvoer vermeldt het bij die extensie.
+- Dezelfde regel geldt voor feeds die de monitor zelf ophaalt.
+
+### Hostingoverzicht: hostingpartij herkend zonder vaste lijst (`hosting_functies.php`, `help.php`)
+Een hostingpartij die niet in de lijst met bekende partijen stond, werd teruggevonden via de IP-toewijzing in RIPE. Bevatte die geen organisatienaam of omschrijving, dan verscheen de netname: een technische code met een datumnummer, geen bedrijfsnaam. Elke nieuwe hostingpartij moest dus met de hand aan de lijst worden toegevoegd.
+
+- **Nieuw: het domein van de hostingpartij wordt uit de DNS afgeleid** (`zoekHostingdomeinUitDns()`). Een hostingpartij geeft haar servers een naam binnen haar eigen domein. Dat domein telt als hostingpartij zodra een tweede, onafhankelijke bron het bevestigt: de nameservers van de site, de FTP-server (als die naar dezelfde server wijst), of de naam van de netwerkeigenaar of IP-toewijzing in RIPE.
+- Nooit het domein van de site zelf, en nooit een domein dat als datacenter of cloudplatform bekend is: dan gaat de naam uit de IP-toewijzing voor.
+- De vaste lijst blijft bestaan voor een nette merknaam en voor het herkennen van datacenters, maar is niet meer nodig om een partij te vinden.
+- **Een netname met een lange reeks cijfers telt niet meer als naam van de hostingpartij.** De herkenning valt dan door naar de naam van de netwerkeigenaar.
+- De helppagina beschrijft de nieuwe herkenning.
+
 ## 1.34 - 2026-10-09
 
 ### Scanscript: systeemmappen buiten de website die niet van het account zijn, overgeslagen (`scan_template.php`, `site_instellingen.php`)

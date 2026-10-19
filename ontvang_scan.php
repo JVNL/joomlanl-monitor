@@ -422,6 +422,10 @@ if ($siteId) {
                 'nieuwste_versie' => $extensie['nieuwste_versie'] ?? null,
                 'enabled' => $extensie['enabled'] ?? false,
                 'package_id' => $extensie['package_id'] ?? 0,
+                // Nodig voor isJoomlaKernExtensie(): los verspreide
+                // "Joomla! Project"-extensies worden
+                // herkend aan hun eigen, niet-joomla.org update-feed.
+                'update_feed_url' => $extensie['update_feed_url'] ?? null,
                 'status'  => isUpToDate($extensie['versie'] ?? null, $extensie['nieuwste_versie'] ?? null),
             ];
 
@@ -506,7 +510,7 @@ if ($siteId) {
         // heeft.
         // ------------------------------------------------------------------
         $alleVersieStatusStmt = $pdo->query("
-            SELECT type, element, folder, naam, auteur, package_id, enabled,
+            SELECT type, element, folder, naam, auteur, package_id, enabled, update_feed_url,
                    (nieuwste_versie IS NOT NULL AND nieuwste_versie != '') AS heeft_versie
             FROM site_alle_extensies
         ");

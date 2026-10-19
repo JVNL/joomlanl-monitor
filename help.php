@@ -1059,6 +1059,11 @@ th {
     <p>Het bedrijf waar de website draait. Herkend aan (in deze volgorde) een bekende naam in de servernaam, in de
     <strong>IP-toewijzing</strong> (aan wie het blok IP-adressen van de server is toegewezen), in de FTP-server, of aan de
     eigenaar van het netwerk volgens RIPE. Beweeg met de muis over de naam om te zien waaraan die herkend is.</p>
+    <p>Een hostingpartij hoeft daarvoor niet vooraf bekend te zijn. Een hostingpartij geeft haar servers meestal een naam
+    binnen haar eigen domein. Bevestigt een tweede bron dat domein - de nameservers van de site, de FTP-server, of de naam
+    bij RIPE - dan wordt dat domein als hostingpartij getoond. Een servernaam binnen het domein van de site zelf telt
+    daarbij niet. Lukt ook dat niet, dan staat er de naam die RIPE kent (zie hieronder). Een technische netwerkcode met een
+    lange reeks cijfers wordt nooit als naam getoond.</p>
     <p>Getoond wordt de partij waar je het hostingpakket afneemt, niet de technische naam erachter. Sommige hostingpartijen
     gebruiken voor hun servers of netwerk een andere naam dan hun merknaam; waar dat bekend is, staat gewoon de merknaam.
     Huurt een hostingpartij ruimte bij een datacenter, dan is het datacenter de netwerkeigenaar, maar staat het IP-blok

@@ -4986,6 +4986,12 @@ function haalUrlsParallelEenvoudig(array $urls, int $timeoutSeconden = 10): arra
 // als attribuut) is.
 function haalHoogsteStabieleVersieUitXml($xmlInhoud, $huidigeVersie = null, $maxKernversie = null, $element = null)
 {
+    // Vlag voor de diagnose-toelichting ("feed bevat alleen ontwikkel-
+    // versies"). Bewust HELEMAAL bovenaan resetten: de element-zoekroute
+    // hieronder kan eerder returnen, en dan zou de vlag van de vorige
+    // extensie blijven staan en bij deze extensie ten onrechte getoond worden.
+    $GLOBALS['laatsteFeedAlleenOntwikkelversies'] = false;
+
     // $element (optioneel): het Joomla-element van de extensie zelf (bijv.
     // "pkg_nl-NL"). Sommige update-feeds zijn geen los bestand per
     // extensie, maar een GEDEELDE "collectie"-lijst met tientallen
@@ -5039,6 +5045,26 @@ function haalHoogsteStabieleVersieUitXml($xmlInhoud, $huidigeVersie = null, $max
     $stabiel = array_values(array_filter($versies, function ($v) {
         return !preg_match('/-(dev|alpha|beta|rc)/i', $v);
     }));
+
+    // Feed bevat WEL versieregels, maar uitsluitend ontwikkelversies
+    // (-dev/-alpha/-beta/-rc)? Dan is er op dit moment geen nieuwere
+    // STABIELE versie beschikbaar dan wat er al draait - Joomla zelf biedt
+    // dan ook geen update aan. Een stabiele geïnstalleerde versie geldt dan
+    // als nieuwste stabiele versie (status "Up-to-date") in plaats van
+    // "Onbekend". Verschijnt er later wél een stabiele versie in de feed,
+    // dan is $stabiel niet meer leeg en wordt die gewoon als update gemeld.
+    // Bewust NIET bij een lege of onleesbare feed (geen enkele versieregel):
+    // dan valt er niets te concluderen en blijft het "Onbekend".
+    // Niet bij taalbestanden ($maxKernversie gezet): daar kan $stabiel
+    // hieronder ook leeg raken door de kernversiegrens, en dat is iets
+    // anders dan een feed met alleen ontwikkelversies.
+    if (!empty($versies) && empty($stabiel)
+        && ($maxKernversie === null || $maxKernversie === '')
+        && $huidigeVersie !== null && $huidigeVersie !== ''
+        && !preg_match('/-(dev|alpha|beta|rc)/i', (string) $huidigeVersie)) {
+        $GLOBALS['laatsteFeedAlleenOntwikkelversies'] = true;
+        return (string) $huidigeVersie;
+    }
 
     // Taalbestanden ontlenen hun versienummer rechtstreeks aan de Joomla-
     // kernversie (bijv. "6.1.3.1" hoort bij Joomla-kern 6.1.3), met een
@@ -5498,7 +5524,23 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
         // bedrijven met "Joomla" in hun eigen merknaam (bijv. RSJoomla!,
         // JoomlaShack, Joomlashine) ten onrechte als kernonderdeel gezien,
         // en daardoor stilzwijgend overgeslagen bij de update-feed-check.
-        $isKern = ($auteur !== null && stripos($auteur, 'joomla! project') !== false)
+        //
+        // UITZONDERING: officiële Joomla-project-extensies die NIET met de
+        // kern meekomen maar los verspreid worden met een eigen update-feed
+        // buiten joomla.org. Die zeggen in hun manifest óók "Joomla!
+        // Project", maar een Joomla-kernupdate werkt ze niet bij - daardoor
+        // werd hun update-feed hier voorheen overgeslagen en bleef een
+        // beschikbare update onopgemerkt. Echte kernonderdelen hebben óf
+        // geen eigen feed, óf een feed op een server van joomla.org.
+        // Zelfde regel als isLosVerspreideJoomlaProjectExtensie() in
+        // versie_vergelijk_functies.php op de monitor.
+        $feedVoorKerncheck = $updateFeedUrls[$rij['extension_id']] ?? null;
+        $feedHostVoorKerncheck = $feedVoorKerncheck ? strtolower((string) parse_url($feedVoorKerncheck, PHP_URL_HOST)) : '';
+        $isLosVerspreideJoomlaExtensie = $feedHostVoorKerncheck !== ''
+            && $feedHostVoorKerncheck !== 'joomla.org'
+            && substr($feedHostVoorKerncheck, -strlen('.joomla.org')) !== '.joomla.org';
+
+        $isKern = ($auteur !== null && stripos($auteur, 'joomla! project') !== false && !$isLosVerspreideJoomlaExtensie)
             || ($rij['type'] === 'file' && $rij['element'] === 'joomla');
 
         if ((int) ($rij['package_id'] ?? 0) > 0) {
@@ -5597,6 +5639,9 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
                     $grensToelichting = $isTaalbestand
                         ? (' [taalbestand, kernversiegrens (van deze site): ' . ($maxKernversieVoorDitItem ?? 'ONBEKEND - geen grens toegepast') . ']')
                         : '';
+                    if (!empty($GLOBALS['laatsteFeedAlleenOntwikkelversies'])) {
+                        $grensToelichting .= ' [feed bevat alleen ontwikkelversies - geen nieuwere stabiele versie, geïnstalleerde versie aangehouden]';
+                    }
                     $diagnose['feed_details'][] = ($isProef ? 'OK (namens de monitor opgehaald, geldt voor alle sites)' : 'OK') . ": {$rij['name']} => $nieuwsteVersie (feed: $updateFeedUrl)" . $grensToelichting;
                 } else {
                     $diagnose['aantal_feed_mislukt']++;

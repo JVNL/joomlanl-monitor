@@ -215,7 +215,7 @@ if ($geselecteerdeSiteId > 0) {
     // joomlanl.nl gewoon al correct bij hun package horen en nooit los
     // getoond worden.
     $stmt = $pdo->prepare("
-        SELECT type, element, folder, naam, auteur, package_id, enabled, nieuwste_versie
+        SELECT type, element, folder, naam, auteur, package_id, enabled, nieuwste_versie, update_feed_url
         FROM site_alle_extensies
         WHERE site_id = ?
     ");

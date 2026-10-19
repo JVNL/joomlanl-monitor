@@ -529,8 +529,13 @@ function maakIpToewijzingLeesbaar(array $toewijzing): ?string
         }
     }
 
+    // Een netname is een technische code, geen bedrijfsnaam. Bevat die een
+    // lange reeks cijfers (een datum of volgnummer, bijv. "NL-XX-19990101"),
+    // dan zegt hij niets leesbaars over de partij: liever doorvallen naar
+    // de naam van de netwerkeigenaar, die altijd een echte naam heeft.
     $netname = trim((string) ($toewijzing['netname'] ?? ''));
-    if ($netname !== '' && preg_match('/[a-z]{2}/i', $netname) && !preg_match($nietszeggend, $netname)) {
+    if ($netname !== '' && preg_match('/[a-z]{2}/i', $netname) && !preg_match($nietszeggend, $netname)
+        && !preg_match('/\d{5,}/', $netname)) {
         return $netname;
     }
 
@@ -612,6 +617,92 @@ function noemtSiteZelf(string $naam, string $siteHost): bool
     $labelPlat = preg_replace('/[^a-z0-9]/', '', $label);
 
     return $labelPlat !== '' && strpos($naamPlat, $labelPlat) !== false;
+}
+
+/**
+ * Het registreerbare domein van een hostnaam: het deel dat een bedrijf
+ * zelf registreert, zonder servernummer ervoor (bijv. "h12.voorbeeld.host"
+ * -> "voorbeeld.host", "web3.provider.co.uk" -> "provider.co.uk"). Geen
+ * volledige Public Suffix List: alleen de gangbare tweedelige achtervoegsels
+ * worden herkend; bij een ander tweedelig achtervoegsel valt het resultaat
+ * hooguit een niveau te kort uit, en wordt het dan ook niet bevestigd
+ * (zie zoekHostingdomeinUitDns()).
+ */
+function bepaalRegistreerbaarDomein(?string $hostnaam): ?string
+{
+    $hostnaam = strtolower(trim((string) $hostnaam, " .\t\n\r"));
+    if ($hostnaam === '' || filter_var($hostnaam, FILTER_VALIDATE_IP)) {
+        return null;
+    }
+    $delen = explode('.', $hostnaam);
+    if (count($delen) < 2) {
+        return null;
+    }
+    $tweedelig = [
+        'co.uk', 'org.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'plc.uk',
+        'com.au', 'net.au', 'org.au', 'co.nz', 'net.nz', 'co.za',
+        'com.br', 'com.tr', 'com.pl', 'co.il', 'co.jp', 'ne.jp', 'com.cn',
+    ];
+    $aantal = in_array(implode('.', array_slice($delen, -2)), $tweedelig, true) ? 3 : 2;
+    if (count($delen) < $aantal) {
+        return null;
+    }
+    return implode('.', array_slice($delen, -$aantal));
+}
+
+/**
+ * Leidt de hostingpartij af uit de DNS, zonder dat die partij in een lijst
+ * hoeft te staan. Uitgangspunt: een hostingpartij geeft haar servers een
+ * naam binnen haar eigen domein (bijv. "h12.voorbeeld.host"). Dat domein
+ * telt alleen als hostingpartij als een TWEEDE, onafhankelijke bron het
+ * bevestigt - een servernaam alleen kan ook van een tussenpartij of een
+ * algemeen netwerkdomein zijn:
+ *   - de nameservers van de site staan in hetzelfde domein, of
+ *   - de FTP-server (die naar dezelfde server wijst) staat in dat domein, of
+ *   - de naam van de netwerkeigenaar of de IP-toewijzing in RIPE bevat de
+ *     naam van dat domein (bijv. domein "voorbeeld.host" en netwerkeigenaar
+ *     "VOORBEELDHOST-AS Voorbeeld Host B.V.").
+ * Nooit het domein van de site zelf (eigen server met eigen naamgeving).
+ *
+ * @return array{0: string, 1: string}|null [domein, herkend via] of null
+ */
+function zoekHostingdomeinUitDns(?string $serverNaam, array $nameservers, ?string $ftpHostOpServer, array $ripeNamen, string $siteHost): ?array
+{
+    $domein = bepaalRegistreerbaarDomein($serverNaam);
+    if ($domein === null || isHostnaamVanSiteZelf($domein, $siteHost)
+        || bepaalRegistreerbaarDomein($siteHost) === $domein) {
+        return null;
+    }
+
+    foreach ($nameservers as $ns) {
+        if (bepaalRegistreerbaarDomein($ns) === $domein) {
+            return [$domein, 'servernaam, bevestigd door de nameservers'];
+        }
+    }
+
+    if ($ftpHostOpServer !== null && bepaalRegistreerbaarDomein($ftpHostOpServer) === $domein) {
+        return [$domein, 'servernaam, bevestigd door de FTP-server'];
+    }
+
+    // Domeinnaam zonder punten en zonder achtervoegsel-scheiding vergelijken
+    // met de RIPE-namen zonder leestekens: "voorbeeld.host" -> "voorbeeldhost".
+    // Korte namen geven te veel toevallige treffers.
+    $label = preg_replace('/[^a-z0-9]/', '', explode('.', $domein)[0]);
+    $volledig = preg_replace('/[^a-z0-9]/', '', $domein);
+    foreach ($ripeNamen as $naam) {
+        $naamPlat = preg_replace('/[^a-z0-9]/', '', strtolower((string) $naam));
+        if ($naamPlat === '') {
+            continue;
+        }
+        if (strlen($volledig) >= 6 && strpos($naamPlat, $volledig) !== false) {
+            return [$domein, 'servernaam, bevestigd door RIPE'];
+        }
+        if (strlen($label) >= 5 && strpos($naamPlat, $label) !== false) {
+            return [$domein, 'servernaam, bevestigd door RIPE'];
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -772,6 +863,26 @@ function bepaalHostingInfo(array $site): array
         $resultaat['hostingpartij'] = $naam;
         $resultaat['herkend_via'] = $bron;
         break;
+    }
+
+    // Geen bekende hostingpartij? Dan eerst het eigen domein van de
+    // hostingpartij uit de DNS afleiden (servernaam, bevestigd door de
+    // nameservers, de FTP-server of RIPE) - werkt voor elke hostingpartij,
+    // zonder dat die in haalBekendeHostingpartijen() hoeft te staan. Niet
+    // als dat domein van een datacenter/cloudplatform blijkt: dan gaat de
+    // specifiekere naam uit de IP-toewijzing hieronder voor.
+    if ($resultaat['hostingpartij'] === null && $serverIp !== null) {
+        $ripeNamen = array_filter([
+            isset($toewijzing) && $toewijzing['fout'] === null ? $toewijzing['organisatie'] : null,
+            isset($toewijzing) && $toewijzing['fout'] === null ? $toewijzing['omschrijving'] : null,
+            isset($toewijzing) && $toewijzing['fout'] === null ? $toewijzing['netname'] : null,
+            $resultaat['netwerk_eigenaar'],
+        ]);
+        $ftpOpServer = ($ftpHost !== '' && in_array($serverIp, $ftpIps, true)) ? $ftpHost : null;
+        $uitDns = zoekHostingdomeinUitDns($resultaat['server_naam'], $resultaat['nameservers'], $ftpOpServer, $ripeNamen, $siteHost);
+        if ($uitDns !== null && !isInfrastructuurpartij(herkenHostingpartij($uitDns[0]))) {
+            [$resultaat['hostingpartij'], $resultaat['herkend_via']] = $uitDns;
+        }
     }
 
     // Geen bekende hostingpartij? Dan de naam uit de IP-toewijzing, als die

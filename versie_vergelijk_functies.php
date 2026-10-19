@@ -303,6 +303,40 @@ function normaliseerAuteur(?string $auteur): string
     return trim($auteur);
 }
 
+/**
+ * Officiële extensies van het Joomla-project (auteur "Joomla! Project") die
+ * GEEN onderdeel van de Joomla-kern zijn, maar als losse extensie worden
+ * geïnstalleerd en via een eigen update-feed worden bijgewerkt. Zonder deze
+ * uitzondering zag isJoomlaKernExtensie() ze als kernonderdeel, waardoor
+ * hun updates nooit gemeld werden, terwijl Joomla's eigen "Extensies:
+ * Updaten" ze wél toont.
+ *
+ * Herkend aan de update-feed, niet aan naam: echte kernonderdelen hebben
+ * óf geen eigen feed, óf een feed op een server van joomla.org (de kern
+ * zelf, de update-component, taalbestanden, de extensiegids). Een eigen
+ * feed op een andere server betekent dat de extensie los wordt bijgewerkt.
+ * Daarvoor moet update_feed_url wel in de meegegeven rij zitten - alle
+ * aanroepers van isJoomlaKernExtensie() selecteren die kolom daarom mee.
+ */
+function isLosVerspreideJoomlaProjectExtensie(array $extensie): bool
+{
+    $feedUrl = trim((string) ($extensie['update_feed_url'] ?? ''));
+    if ($feedUrl === '') {
+        return false;
+    }
+    return !isJoomlaOrgFeed($feedUrl);
+}
+
+/**
+ * Staat deze update-feed op een server van het Joomla-project zelf
+ * (joomla.org of een subdomein daarvan)?
+ */
+function isJoomlaOrgFeed(string $feedUrl): bool
+{
+    $host = strtolower((string) parse_url($feedUrl, PHP_URL_HOST));
+    return $host === 'joomla.org' || substr($host, -strlen('.joomla.org')) === '.joomla.org';
+}
+
 function isJoomlaKernExtensie(array $extensie): bool
 {
     $auteur = normaliseerAuteur($extensie['auteur'] ?? '');
@@ -313,8 +347,15 @@ function isJoomlaKernExtensie(array $extensie): bool
     // bedrijven met "Joomla" in hun eigen merknaam (bijv. RSJoomla!,
     // JoomlaShack, Joomlashine) ten onrechte als kernonderdeel gezien, en
     // daardoor uit de extensielijst gefilterd.
+    //
+    // UITZONDERING: officiële extensies van het Joomla-project die NIET met
+    // de Joomla-kern zelf meekomen, maar los worden verspreid en een eigen
+    // update-feed hebben buiten joomla.org. Hun manifest zegt ook "Joomla! Project", maar een
+    // Joomla-kernupdate werkt ze niet bij - ze moeten dus gewoon als
+    // extensie van derden gecontroleerd worden. Zie
+    // isLosVerspreideJoomlaProjectExtensie().
     if ($auteur !== '' && strpos($auteur, 'joomla! project') !== false) {
-        return true;
+        return !isLosVerspreideJoomlaProjectExtensie($extensie);
     }
 
     // Joomla-zelf (het "file"-type met element "joomla") heeft geen apart

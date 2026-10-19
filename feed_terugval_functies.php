@@ -324,6 +324,22 @@ function bepaalNieuwsteVersieUitFeedInhoud(string $xmlInhoud, ?string $huidigeVe
         return !preg_match('/-(dev|alpha|beta|rc)/i', $v);
     }));
 
+    // Feed bevat WEL versieregels, maar uitsluitend ontwikkelversies
+    // (-dev/-alpha/-beta/-rc)? Dan is er op dit moment geen nieuwere
+    // STABIELE versie beschikbaar dan wat er al draait - Joomla zelf biedt
+    // dan ook geen update aan. Een stabiele geïnstalleerde versie geldt dan
+    // als nieuwste stabiele versie (status "Up-to-date") in plaats van
+    // "Onbekend". Verschijnt er later wél een stabiele versie in de feed,
+    // dan is $stabiel niet meer leeg en wordt die gewoon als update gemeld.
+    // Bewust NIET bij een lege of onleesbare feed (geen enkele versieregel):
+    // dan valt er niets te concluderen en blijft het "Onbekend".
+    // Zelfde regel als in haalHoogsteStabieleVersieUitXml() in scan_template.php.
+    if (!empty($versies) && empty($stabiel)
+        && $huidigeVersie !== null && $huidigeVersie !== ''
+        && !preg_match('/-(dev|alpha|beta|rc)/i', $huidigeVersie)) {
+        return $huidigeVersie;
+    }
+
     if (empty($stabiel)) {
         return null;
     }

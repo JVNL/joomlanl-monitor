@@ -628,20 +628,32 @@ function vulNieuwsteVersiesAanViaMonitor(PDO $pdo, array &$extensies, bool $magO
     }
 
     $feeds = haalFeedInhoudMetCache($pdo, array_values($kandidaten), $magOphalen);
+    $verwantCache = [];
 
     foreach ($kandidaten as $index => $feedUrl) {
         $feed = ($feeds[$feedUrl] ?? []) + ['inhoud' => null, 'fout' => 'niet opgehaald', 'laatst_gelukt_op' => null, 'vers' => false, 'handmatige_versie' => null, 'handmatig_op' => null];
         $naam = (string) ($extensies[$index]['naam'] ?? $feedUrl);
 
         // Sommige extensies staan bij verschillende sites met een net andere
-        // feed-URL geregistreerd (bijv. .../updates/forms/... en
-        // .../updates/baforms/... voor hetzelfde pakket). Is van déze URL nog
-        // nooit iets binnengekomen, dan volstaat een al bewaarde feed van
-        // dezelfde update-server die aantoonbaar over hetzelfde element gaat.
+        // feed-URL geregistreerd (bijv. een oudere en een nieuwere map op
+        // dezelfde update-server voor hetzelfde pakket). Er wordt dan een al
+        // bewaarde feed van dezelfde update-server gebruikt die aantoonbaar
+        // over hetzelfde element gaat - niet alleen als van déze URL nog nooit
+        // iets binnenkwam, maar ook als die andere feed recenter is opgehaald
+        // (sinds 1.36). Anders bleef een site met de andere URL op een oude
+        // versie hangen zolang er niet toevallig via precies die URL opnieuw
+        // werd opgehaald.
         $element = isset($extensies[$index]['element']) ? trim((string) $extensies[$index]['element']) : '';
-        if ($feed['inhoud'] === null && $element !== '') {
-            $verwant = zoekVerwanteFeedInhoud($pdo, $feedUrl, $element);
-            if ($verwant !== null) {
+        if ($element !== '' && !$feed['vers']) {
+            $verwantSleutel = $feedUrl . '|' . strtolower($element);
+            if (!array_key_exists($verwantSleutel, $verwantCache)) {
+                $verwantCache[$verwantSleutel] = zoekVerwanteFeedInhoud($pdo, $feedUrl, $element);
+            }
+            $verwant = $verwantCache[$verwantSleutel];
+            if ($verwant !== null
+                && ($feed['inhoud'] === null
+                    || (string) $verwant['laatst_gelukt_op'] > (string) $feed['laatst_gelukt_op'])
+            ) {
                 $feed['inhoud'] = $verwant['inhoud'];
                 $feed['laatst_gelukt_op'] = $verwant['laatst_gelukt_op'];
                 $feed['vers'] = false;
@@ -719,6 +731,93 @@ function zoekVerwanteFeedInhoud(PDO $pdo, string $feedUrl, string $element): ?ar
     }
 
     return null;
+}
+
+/**
+ * Of een host onder een van de centraal opgehaalde update-servers valt
+ * (zelfde host, of een subdomein ervan).
+ *
+ * @param string[] $centraleHosts
+ */
+function isCentraleFeedHost(string $host, array $centraleHosts): bool
+{
+    foreach ($centraleHosts as $centraal) {
+        if ($host === $centraal || substr($host, -strlen('.' . $centraal)) === '.' . $centraal) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Werkt (sinds 1.36) de opgeslagen nieuwste versie bij van extensies waarvan
+ * de feed centraal wordt opgehaald, zodra de centrale cache een HOGERE versie
+ * kent dan wat er bij een site staat.
+ *
+ * Achtergrond: het vangnet in haal_versies_op.php vulde alleen een LEGE
+ * nieuwste versie aan. Haalde één site een nieuwe versie van zo'n feed op,
+ * dan kregen de andere sites die pas te zien na een eigen herscan; tot die
+ * tijd bleef de oude versie staan (en dus bijv. "Up-to-date").
+ *
+ * Leest uitsluitend uit de cache: er gaat geen enkel verzoek naar een
+ * update-server. Een lagere of gelijke versie wordt nooit weggeschreven, zodat
+ * een (tijdelijk) achterlopende feed niets terugdraait.
+ *
+ * @return string[] logregels, één per bijgewerkte extensieregel
+ */
+function werkVerouderdeCentraleVersiesBij(PDO $pdo): array
+{
+    $log = [];
+    $centraleHosts = haalCentraleFeedHostLijst($pdo);
+    if (empty($centraleHosts)) {
+        return $log;
+    }
+
+    $rijen = $pdo->query("
+        SELECT sae.site_id, sae.extension_id, sae.naam, sae.type, sae.element, sae.folder,
+               sae.versie, sae.nieuwste_versie, sae.update_feed_url, sae.auteur, sae.package_id,
+               s.domein
+        FROM site_alle_extensies sae
+        JOIN sites s ON s.id = sae.site_id
+        WHERE sae.update_feed_url IS NOT NULL AND sae.update_feed_url != ''
+          AND sae.nieuwste_versie IS NOT NULL AND sae.nieuwste_versie != ''
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $kandidaten = [];
+    foreach ($rijen as $rij) {
+        if (!isCentraleFeedHost(feedHostVanUrl(trim((string) $rij['update_feed_url'])), $centraleHosts)) {
+            continue;
+        }
+        $rij['vorige_nieuwste_versie'] = (string) $rij['nieuwste_versie'];
+        $rij['nieuwste_versie'] = null; // opnieuw laten bepalen uit de cache
+        if (isKandidaatVoorFeedTerugval($rij)) {
+            $kandidaten[] = $rij;
+        }
+    }
+    if (empty($kandidaten)) {
+        return $log;
+    }
+
+    $verslag = vulNieuwsteVersiesAanViaMonitor($pdo, $kandidaten, false);
+
+    $updateStmt = $pdo->prepare("
+        UPDATE site_alle_extensies
+        SET nieuwste_versie = ?
+        WHERE site_id = ? AND extension_id = ? AND nieuwste_versie = ?
+    ");
+    foreach ($verslag['gelukt'] as $item) {
+        $rij    = $kandidaten[$item['index']];
+        $vorige = $rij['vorige_nieuwste_versie'];
+        $nieuw  = (string) $item['versie'];
+        if (version_compare($nieuw, $vorige, '>')) {
+            $updateStmt->execute([$nieuw, $rij['site_id'], $rij['extension_id'], $vorige]);
+            if ($updateStmt->rowCount() > 0) {
+                $log[] = "{$rij['domein']}: {$item['naam']} => {$nieuw} (was {$vorige}, bijgewerkt uit de centraal opgehaalde feed)";
+            }
+        }
+    }
+
+    return $log;
 }
 
 /**

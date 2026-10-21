@@ -657,6 +657,19 @@ try {
     $terugvalLog[] = 'Terugval kon niet worden uitgevoerd: ' . $e->getMessage();
 }
 
+// Sinds 1.36: ook een al ingevulde, maar inmiddels verouderde versie van een
+// centraal opgehaalde feed bijwerken (alleen naar een hogere versie, alleen
+// uit de cache - geen extra verzoeken naar update-servers). Zo krijgen alle
+// sites een nieuwe versie meteen te zien zodra één site die heeft opgehaald,
+// zonder dat iedere site eerst opnieuw gescand hoeft te worden.
+try {
+    foreach (werkVerouderdeCentraleVersiesBij($pdo) as $regel) {
+        $terugvalLog[] = $regel;
+    }
+} catch (\Throwable $e) {
+    $terugvalLog[] = 'Bijwerken van verouderde centrale versies mislukt: ' . $e->getMessage();
+}
+
 echo implode("\n", $log);
 echo "\n\nNieuwste beschikbare versies:\n" . implode("\n", $nieuwsteLog) . "\n";
 echo "(let op: extensies zonder update_feed_url in de catalogus, zoals yootheme, worden niet automatisch opgehaald)\n";

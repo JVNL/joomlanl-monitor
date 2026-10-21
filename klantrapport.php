@@ -99,6 +99,19 @@ $joomlaMajor  = bepaalMajorVersie($joomlaHuidig);
 $joomlaNieuwsteBinnenMajor = $joomlaMajor !== null ? ($nieuwsteVersies['joomla_' . $joomlaMajor] ?? null) : null;
 $joomlaStatus = ($joomlaHuidig !== null && $joomlaHuidig !== '') ? isUpToDate($joomlaHuidig, $joomlaNieuwsteBinnenMajor) : null;
 
+// Super Users (sinds 1.36): dezelfde gegevens als in het beveiligingsrapport,
+// rechtstreeks uit de database van de site gelezen door het scanscript. Puur
+// ter controle door de eigenaar ("herken je elk account?"), dus geen
+// aandachtspunt in de telling hieronder.
+$superUsers = [];
+if (!empty($site['super_users_json'])) {
+    $gedecodeerd = json_decode($site['super_users_json'], true);
+    if (is_array($gedecodeerd)) {
+        $superUsers = $gedecodeerd;
+    }
+}
+$superUsersFout = trim((string) ($site['super_users_fout'] ?? ''));
+
 $programmaNaam = trim(haalInstelling($pdo, 'email_afzendernaam', '')) ?: 'Mijn Websites Monitor';
 $laatsteScan = $site['verdacht_laatste_scan'] ? date('d-m-Y H:i', strtotime($site['verdacht_laatste_scan'])) : 'nog niet gescand';
 
@@ -112,6 +125,19 @@ $totaalProblemen = $aantalBedreigingen + $aantalRechtenBestanden + $aantalRechte
 function h($tekst)
 {
     return htmlspecialchars((string) $tekst, ENT_QUOTES, 'UTF-8');
+}
+
+// Datum uit de Joomla-database (bijv. "2024-03-05 14:22:10") in dezelfde
+// notatie als de rest van dit rapport. Lege of "nul"-datums (Joomla 3 gebruikt
+// 0000-00-00 00:00:00 voor "nooit") geven null.
+function rapportDatum($waarde): ?string
+{
+    $waarde = trim((string) $waarde);
+    if ($waarde === '' || strpos($waarde, '0000-00-00') === 0) {
+        return null;
+    }
+    $tijd = strtotime($waarde);
+    return $tijd ? date('d-m-Y H:i', $tijd) : $waarde;
 }
 
 function risicoKleur(int $risico): string
@@ -167,6 +193,10 @@ function risicoKleur(int $risico): string
     .extensie-regel { margin: 6px 0; }
     .extensie-naam { font-weight: bold; display: inline-block; min-width: 200px; }
     .alles-schoon { color: var(--thema-groen); font-weight: bold; font-size: 15px; margin-top: 10px; }
+    table.beheerders { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.beheerders th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--thema-rand); }
+    table.beheerders td { padding: 6px 8px; border-bottom: 1px solid var(--thema-rand); vertical-align: top; }
+    .beheerder-geblokkeerd { color: var(--thema-uitleg-tekst); }
     footer {
         margin-top: 40px;
         padding-top: 10px;
@@ -255,6 +285,7 @@ function risicoKleur(int $risico): string
         body { padding: 0; max-width: none; }
         h2 { page-break-after: avoid; }
         .item-blok { page-break-inside: avoid; }
+        table.beheerders tr { page-break-inside: avoid; }
     }
 </style>
 </head>
@@ -307,6 +338,13 @@ foreach ($samenvattingRegels as [$aantal, $omschrijving]):
         <span style="width: 14px; display: inline-block;"></span>
         <span>Joomla-kernversie: <?php echo h($joomlaHuidig); ?> (nieuwste versie niet automatisch te bepalen)</span>
     <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<?php if (!empty($superUsers)): ?>
+<div class="samenvatting-regel">
+    <span style="width: 14px; display: inline-block;"></span>
+    <span><?php echo count($superUsers); ?> beheerdersaccount(s) met volledige rechten (Super Users) - controleer onderaan of je ze allemaal herkent</span>
 </div>
 <?php endif; ?>
 
@@ -412,6 +450,36 @@ function toonItems(array $items): void
     <span style="color: #888;">huidige versie: <?php echo h($extensie['versie'] ?: 'onbekend'); ?></span>
 </div>
 <?php endforeach; ?>
+<?php endif; ?>
+<?php endif; ?>
+
+<?php if ($superUsersFout !== '' || !empty($superUsers)): ?>
+<h2>Beheerdersaccounts (Super Users)<?php echo !empty($superUsers) ? ' (' . count($superUsers) . ')' : ''; ?></h2>
+<?php if ($superUsersFout !== ''): ?>
+<div class="uitleg-alinea">De beheerdersaccounts konden bij de laatste scan niet worden uitgelezen.</div>
+<?php else: ?>
+<div class="uitleg-alinea">Deze accounts hebben volledige beheerrechten op de website. Controleer of je elk account herkent: een onbekend account kan erop wijzen dat iemand zonder toestemming toegang heeft gekregen. Verwijder of blokkeer accounts die niet (meer) nodig zijn, via de Joomla-beheerder ("Gebruikers" -&gt; "Beheren").</div>
+<table class="beheerders responsive-tabel">
+    <tr>
+        <th>Naam</th>
+        <th>Gebruikersnaam</th>
+        <th>E-mail</th>
+        <th>Aangemaakt</th>
+        <th>Laatst ingelogd</th>
+        <th>Status</th>
+    </tr>
+    <?php foreach ($superUsers as $beheerder): ?>
+    <?php $geblokkeerd = (int) ($beheerder['block'] ?? 0) === 1; ?>
+    <tr<?php echo $geblokkeerd ? ' class="beheerder-geblokkeerd"' : ''; ?>>
+        <td data-label="Naam"><?php echo h(($beheerder['name'] ?? '') !== '' ? $beheerder['name'] : '-'); ?></td>
+        <td data-label="Gebruikersnaam"><?php echo h(($beheerder['username'] ?? '') !== '' ? $beheerder['username'] : '-'); ?></td>
+        <td data-label="E-mail"><?php echo h(($beheerder['email'] ?? '') !== '' ? $beheerder['email'] : '-'); ?></td>
+        <td data-label="Aangemaakt"><?php echo h(rapportDatum($beheerder['registerDate'] ?? '') ?? '-'); ?></td>
+        <td data-label="Laatst ingelogd"><?php echo h(rapportDatum($beheerder['lastvisitDate'] ?? '') ?? 'nooit ingelogd'); ?></td>
+        <td data-label="Status"><?php echo $geblokkeerd ? 'geblokkeerd' : 'actief'; ?></td>
+    </tr>
+    <?php endforeach; ?>
+</table>
 <?php endif; ?>
 <?php endif; ?>
 

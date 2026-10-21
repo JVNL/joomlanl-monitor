@@ -1,5 +1,32 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.36 - 2026-10-21
+
+### Super Users in het klantrapport (`klantrapport.php`, `help.php`)
+Het klantrapport toont nu ook de beheerdersaccounts met volledige rechten (Super Users), met dezelfde gegevens als het beveiligingsrapport: naam, gebruikersnaam, e-mail, aangemaakt, laatst ingelogd en status. De eigenaar kan zo zelf controleren of hij elk account herkent.
+
+- In de samenvatting staat het aantal als neutrale regel; het telt niet mee als aandachtspunt.
+- Kon het scanscript de accounts niet uitlezen, dan meldt het rapport dat zonder de technische foutmelding.
+- Datums staan in dezelfde notatie als de rest van het rapport; een account dat nooit heeft ingelogd, toont "nooit ingelogd".
+
+### Nieuwe versie van een centraal opgehaalde feed bereikte niet alle sites (`feed_terugval_functies.php`, `haal_versies_op.php`, `help.php`)
+Haalde één site een centraal opgehaalde update-feed op met een nieuwe versie, dan zagen de andere sites die niet allemaal. Een deel bleef op de vorige versie staan, en meldde dus "Up-to-date" terwijl er een update was. Twee oorzaken:
+
+- **Verschillende feed-URL's voor hetzelfde pakket.** Dezelfde extensie kan bij verschillende sites met een net andere feed-URL op dezelfde update-server geregistreerd staan. De centrale cache wordt per URL bijgehouden, en een verwante feed (zelfde server, zelfde element) werd alleen gebruikt als er van de eigen URL nog nooit iets was binnengekomen. Een site met de andere URL bleef daardoor op de oude inhoud van haar eigen URL hangen. **Nu geldt steeds de meest recent opgehaalde feed**: de eigen of een verwante, welke het laatst lukte.
+- **Het vangnet vulde alleen lege versies aan.** Een al opgeslagen, maar inmiddels verouderde versie bleef staan tot de site zelf opnieuw gescand werd. **Nieuw: `werkVerouderdeCentraleVersiesBij()`** werkt na elke scan bij alle sites de nieuwste versie van centraal opgehaalde feeds bij, als de cache een hogere versie kent. Alleen uit de cache, zonder extra verzoeken naar update-servers, en nooit naar een lagere versie.
+- De bijgewerkte regels staan in de uitvoer van `haal_versies_op.php`, met de vorige versie erbij.
+- De helppagina beschrijft het.
+
+### Nieuwe kolom "PHP" op de indexpagina (`scan_template.php`, `ontvang_scan.php`, `auto_migratie.php`, `index.php`, `help.php`)
+De indexpagina toont nu tussen "Joomla" en "SSL status" de PHP-versie waarop de website draait.
+
+- **Het scanscript meldt de PHP-versie bij elke scan** aan de monitor, en toont hem ook bovenaan de ruwe scanuitvoer. Omdat het scanscript in dezelfde map staat als de website, is dit de PHP-versie die de website zelf gebruikt.
+- De monitor bewaart alleen het versienummer zelf, zonder toevoegingen van hostingpartij of besturingssysteem, in de nieuwe kolom `sites.php_versie` (migratiestap 26). Stuurt een ouder scanscript geen PHP-versie mee, dan blijft de laatst bekende waarde staan.
+- **De kolom is sorteerbaar**, ook in de keuzelijst op mobiel: oudste PHP-versie eerst, sites zonder bekende versie onderaan.
+- Puur ter informatie, zonder kleur of oordeel: welke PHP-versie geschikt is, hangt af van de Joomla-versie en de extensies van de site.
+- Het vraagtekentje bij de kolomkop linkt naar een nieuw artikel in de helppagina.
+- Het scanscript werkt zichzelf bij de eerstvolgende scan bij; die scan vult de PHP-versie al in.
+
 ## 1.35 - 2026-10-18
 
 ### Updates van los verspreide Joomla-project-extensies werden niet gemeld (`scan_template.php`, `versie_vergelijk_functies.php`, `ontvang_scan.php`, `extensie_beheer.php`)

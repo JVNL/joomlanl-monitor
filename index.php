@@ -83,7 +83,7 @@ $totaal = count($sites);
 // beveiligingsstatus, zodat de sites die de meeste aandacht nodig hebben
 // bovenaan komen.
 $sorteerOp = $_GET['sorteer'] ?? 'domein';
-if (!in_array($sorteerOp, ['domein', 'joomla', 'extensies', 'beveiliging', 'bestanden'], true)) {
+if (!in_array($sorteerOp, ['domein', 'joomla', 'php', 'extensies', 'beveiliging', 'bestanden'], true)) {
     $sorteerOp = 'domein';
 }
 
@@ -988,6 +988,7 @@ foreach ($sites as $siteVoorTelling) {
         <select id="mobiel-sorteer-select" onchange="window.location.href = '?categorie=<?php echo urlencode($categorie); ?>&sorteer=' + this.value + '&richting=normaal';" style="width: 100%; padding: 8px;">
             <option value="domein" <?php echo $sorteerOp === 'domein' ? 'selected' : ''; ?>>Domein (alfabetisch)</option>
             <option value="joomla" <?php echo $sorteerOp === 'joomla' ? 'selected' : ''; ?>>Joomla versie</option>
+            <option value="php" <?php echo $sorteerOp === 'php' ? 'selected' : ''; ?>>PHP versie (oudste eerst)</option>
             <option value="extensies" <?php echo $sorteerOp === 'extensies' ? 'selected' : ''; ?>>Extensies (meeste aandacht eerst)</option>
             <option value="beveiliging" <?php echo $sorteerOp === 'beveiliging' ? 'selected' : ''; ?>>Beveiliging (meeste aandacht eerst)</option>
             <option value="bestanden" <?php echo $sorteerOp === 'bestanden' ? 'selected' : ''; ?>>Bestandsafwijkingen (meeste eerst)</option>
@@ -1003,6 +1004,7 @@ foreach ($sites as $siteVoorTelling) {
     <th style="width: 240px;"><?php echo sorteerKopLink('domein', 'Domein', '▲', 'Sorteer alfabetisch op domein', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('site-instellingen', 'Klik op de domeinnaam om rechtstreeks in te loggen bij het Joomla-beheer van deze site (in een nieuw tabblad).'); ?></th>
     <th style="width: 100px;">Website<?php echo hulpIcoon('statussen', 'Online/Offline wordt bepaald door de website zelf op te vragen - een foutcode (403/500/etc.), geen verbinding, of verdachte inhoud in de reactie telt als Offline.'); ?></th>
     <th style="width: 90px;"><?php echo sorteerKopLink('joomla', 'Joomla', '▼', 'Sorteer op Joomla versie', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('statussen', 'De geïnstalleerde Joomla-kernversie, opgehaald via het admin-pad. Rood betekent dat er een nieuwere versie binnen dezelfde hoofdversie beschikbaar is.'); ?></th>
+    <th style="width: 70px;"><?php echo sorteerKopLink('php', 'PHP', '▼', 'Sorteer op PHP versie (oudste eerst)', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('php-versie', 'De PHP-versie waarop de website draait, gemeld door het scanscript bij elke scan. Leeg betekent dat de site nog niet is gescand sinds deze kolom bestaat.'); ?></th>
     <th style="width: 140px;">SSL status<?php echo hulpIcoon('statussen', 'Aantal dagen tot het SSL-certificaat verloopt. Wordt oranje/rood zodra dat aantal dagen laag genoeg is om actie te overwegen.'); ?></th>
     <th style="width: 200px;"><?php echo sorteerKopLink('extensies', 'Extensies', '▼', 'Sorteer op meeste aandacht nodig', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('statussen', 'Groen = alle extensies van derden zijn up-to-date. Rood = er is minstens één verouderde extensie gevonden. Grijs = (deels) onbekend, bijvoorbeeld omdat er nog geen update-locatie voor is geregistreerd.'); ?></th>
     <th style="width: 200px;"><?php echo sorteerKopLink('beveiliging', 'Beveiliging', '▼', 'Sorteer op meeste aandacht nodig', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('beveiliging', 'Toont het aantal nieuwe/niet-vertrouwde items dat de laatste scan heeft gevonden. Groen ("Schoon") betekent dat alles wat gevonden is, al eerder als vertrouwd is gemarkeerd.'); ?></th>
@@ -1169,6 +1171,13 @@ foreach ($sites as $site) {
     // score, dus geen enkele zichtbare herschikking tussen hoofdversies.
     $joomlaMajorGetal = $joomlaMajor !== null ? (int) $joomlaMajor : PHP_INT_MAX;
 
+    // PHP-versie waarop de website draait (sinds 1.36), gemeld door het
+    // scanscript. Puur ter informatie, zonder kleur of oordeel: wat een
+    // geschikte PHP-versie is, hangt af van de Joomla-versie en de
+    // extensies van de site.
+    $phpVersie = trim((string) ($site['php_versie'] ?? ''));
+    $phpCel = $phpVersie !== '' ? htmlspecialchars($phpVersie) : '';
+
     // Extensies: uitsluitend gebaseerd op de volledige scan (site_alle_extensies
     // via $alleDerdePartijSamenvatting) - zie de toelichting hierboven bij de
     // samenvattende telling voor waarom het oudere mechanisme (site_extensies)
@@ -1261,6 +1270,8 @@ foreach ($sites as $site) {
         'joomlaHuidig' => $joomlaHuidig,
         'joomlaMajorGetal' => $joomlaMajorGetal,
         'joomlaStatus' => $joomlaStatus,
+        'phpVersie' => $phpVersie,
+        'phpCel' => $phpCel,
     ];
 }
 
@@ -1306,6 +1317,24 @@ if ($sorteerOp === 'joomla') {
         // 5. Tot slot: alfabetisch op domein.
         return strcasecmp($a['site']['domein'] ?? '', $b['site']['domein'] ?? '');
     });
+} elseif ($sorteerOp === 'php') {
+    // Oudste PHP-versie eerst (die verdient de meeste aandacht); sites
+    // zonder bekende PHP-versie altijd onderaan; bij gelijke versie
+    // alfabetisch op domein.
+    usort($weergaveRijen, function ($a, $b) {
+        $aGeenData = $a['phpVersie'] === '';
+        $bGeenData = $b['phpVersie'] === '';
+        if ($aGeenData !== $bGeenData) {
+            return $aGeenData ? 1 : -1;
+        }
+        if (!$aGeenData) {
+            $versieVergelijking = version_compare($a['phpVersie'], $b['phpVersie']);
+            if ($versieVergelijking !== 0) {
+                return $versieVergelijking;
+            }
+        }
+        return strcasecmp($a['site']['domein'] ?? '', $b['site']['domein'] ?? '');
+    });
 } elseif ($sorteerOp === 'extensies') {
     usort($weergaveRijen, function ($a, $b) {
         return $b['ernstExtensies'] <=> $a['ernstExtensies'] ?: strcasecmp($a['site']['domein'] ?? '', $b['site']['domein'] ?? '');
@@ -1343,6 +1372,7 @@ if ($richting === 'omgekeerd') {
     $beveiliging = $rij['beveiliging'];
     $bestandenCel = $rij['bestandenCel'];
     $joomlaCel = $rij['joomlaCel'];
+    $phpCel = $rij['phpCel'];
     $extensiesCel = $rij['extensiesCel'];
     $adminUrl = $rij['adminUrl'];
     $faviconUrl = $rij['faviconUrl'];
@@ -1360,6 +1390,7 @@ if ($richting === 'omgekeerd') {
     </td>
     <td data-label="Website" class="<?php echo $websiteClass; ?>"><?php echo $websiteStatus; ?></td>
     <td data-label="Joomla"><?php echo $joomlaCel; ?></td>
+    <td data-label="PHP"><?php echo $phpCel; ?></td>
     <td data-label="SSL status" class="<?php echo $sslClass; ?>"><?php echo htmlspecialchars($sslStatus); ?></td>
     <td data-label="Extensies"><?php echo $extensiesCel; ?></td>
     <?php echo $beveiliging; ?>

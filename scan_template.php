@@ -5913,6 +5913,9 @@ echo "Domein: " . $domein . "\n";
 // resultaten (bv. "/images/foto.gif") zijn relatief aan deze map - handig om te
 // controleren of je via FTP wel in dezelfde map kijkt als waar de scan draait.
 echo "Scanmap: " . $startMap . "\n";
+// PHP-versie waarmee de website (en dus ook dit scanscript, dat in dezelfde
+// map staat) wordt uitgevoerd - wordt ook naar de monitor gestuurd.
+echo "PHP-versie: " . PHP_VERSION . "\n";
 echo "Start: " . date('Y-m-d H:i:s') . "\n";
 // De monitor stuurt bij elke aanroep een unieke code mee (?nc=...) en controleert dat die hier terugkomt:
 // alleen dan is dit antwoord echt door een nu uitgevoerde scan geschreven, en niet uit een cache gehaald.
@@ -6623,6 +6626,7 @@ $payload = [
     'geinstalleerde_extensies' => $extensieResultaat['extensies'] ?? null,
     'super_users' => $superUsersResultaat['beheerders'] ?? null,
     'super_users_fout' => $superUsersResultaat['fout'] ?? null,
+    'php_versie' => PHP_VERSION,
     'extensies_fout' => $extensieResultaat['fout'] ?? null,
     'extensie_bestand_hashes' => $extensieResultaat['bestand_hashes'] ?? null,
     'feed_geblokkeerde_hosts' => array_keys($extensieResultaat['diagnose']['geblokkeerde_hosts'] ?? []),

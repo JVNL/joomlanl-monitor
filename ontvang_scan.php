@@ -229,6 +229,27 @@ if (array_key_exists('super_users', $data) || array_key_exists('super_users_fout
 }
 
 // --------------------------------------------------------------------
+// PHP-versie waarop de website draait (sinds 1.36), getoond op de
+// indexpagina. Alleen opgeslagen als het scanscript hem meestuurt - een
+// ouder scanscript laat de laatst bekende waarde dus gewoon staan. Alleen
+// het versienummer zelf (bv. "8.3.14"), zonder toevoegingen van de
+// hostingpartij of het besturingssysteem.
+// --------------------------------------------------------------------
+if (isset($data['php_versie']) && is_string($data['php_versie'])
+    && preg_match('/^(\d{1,2}\.\d{1,2}(?:\.\d{1,3})?)/', $data['php_versie'], $phpMatch)
+) {
+    try {
+        require_once 'auto_migratie.php';
+        zorgVoorPhpVersieKolom($pdo);
+        $stmt = $pdo->prepare("UPDATE sites SET php_versie = ? WHERE domein = ?");
+        $stmt->execute([$phpMatch[1], $domeinVoorVergelijk]);
+    } catch (\Throwable $e) {
+        // Nooit de verwerking van de scan zelf laten mislukken hierdoor.
+        echo "\nWaarschuwing: PHP-versie kon niet worden opgeslagen - " . $e->getMessage();
+    }
+}
+
+// --------------------------------------------------------------------
 // Centraal opgehaalde update-feeds (sinds 1.29): voor update-feeds die de
 // site zelf niet kon of mocht ophalen (bijv. omdat de update-server
 // verzoeken van websites blokkeert), vult de monitor de nieuwste versie aan

@@ -51,6 +51,18 @@ function zorgVoorRootNegeerPatronenKolom(PDO $pdo): void
 }
 
 /**
+ * Kolom voor de PHP-versie waarop de website draait (migratiestap 26, sinds 1.36). Ook los aangeroepen vanuit
+ * ontvang_scan.php vóór het opslaan, om dezelfde reden als zorgVoorRootNegeerPatronenKolom() hierboven: op een
+ * installatie met een al hoger schema_versie-nummer wordt stap 26 anders overgeslagen.
+ */
+function zorgVoorPhpVersieKolom(PDO $pdo): void
+{
+    if (!kolomBestaat($pdo, 'sites', 'php_versie')) {
+        $pdo->exec("ALTER TABLE `sites` ADD COLUMN `php_versie` VARCHAR(20) NULL DEFAULT NULL AFTER `joomla_versie`");
+    }
+}
+
+/**
  * Genummerde migratiestappen. Elke stap krijgt de $pdo-verbinding mee, en
  * moet zelf idempotent zijn (mag geen fout geven als 'm per ongeluk twee
  * keer draait).
@@ -568,6 +580,14 @@ function haalMigraties(): array
         // ----------------------------------------------------------------
         25 => function (PDO $pdo) {
             zorgVoorRootNegeerPatronenKolom($pdo);
+        },
+
+        // ----------------------------------------------------------------
+        // Stap 26 (versie 1.36): PHP-versie waarop de website draait,
+        // gemeld door het scanscript en getoond op de indexpagina.
+        // ----------------------------------------------------------------
+        26 => function (PDO $pdo) {
+            zorgVoorPhpVersieKolom($pdo);
         },
 
     ];

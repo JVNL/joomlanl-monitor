@@ -1387,6 +1387,39 @@ const VERVOLG_SCAN_STARTEN = <?php echo $vervolgScanStarten ? 'true' : 'false'; 
 const TOTAAL     = <?php echo (int)$totaalAantal; ?>;
 const CSRF_TOKEN = <?php echo json_encode(haalCsrfToken()); ?>;
 
+/**
+ * Pakt de formuliervelden van een AJAX-POST in als één base64-veld "pb"
+ * (wordt in sessie_start.php weer uitgepakt). Voorkomt dat de firewall van
+ * de hostingpartij een verzoek weigert omdat er een pad als ".../.htaccess"
+ * in staat - zie de toelichting in sessie_start.php.
+ * Accepteert een URLSearchParams-object of een kant-en-klare querystring.
+ */
+function ingepakteBody(velden) {
+    const bytes = new TextEncoder().encode(velden.toString());
+    let binair = '';
+    for (const b of bytes) {
+        binair += String.fromCharCode(b);
+    }
+    return 'pb=' + encodeURIComponent(btoa(binair));
+}
+
+/**
+ * Zoals response.json(), maar met een bruikbare foutmelding als er geen
+ * JSON terugkomt (bv. de kale 403-pagina van een firewall): HTTP-status
+ * plus het begin van de ontvangen tekst, i.p.v. "JSON.parse: unexpected
+ * character at line 1 column 1".
+ */
+function leesJson(r) {
+    return r.text().then(tekst => {
+        try {
+            return JSON.parse(tekst);
+        } catch (e) {
+            const fragment = tekst.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 150);
+            throw new Error('Geen geldig antwoord van de monitor (HTTP ' + r.status + ')' + (fragment ? ': "' + fragment + '"' : ''));
+        }
+    });
+}
+
 function ftpWachtwoordKopieren(knop, evt) {
     const wachtwoord = knop.dataset.wachtwoord;
     const gebruikersnaam = knop.dataset.gebruikersnaam;
@@ -1705,9 +1738,9 @@ function beheerFetch(actie, extraVelden, knop, siteId = SITE_ID) {
     return fetch('site_beheer_actie.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString()
+        body: ingepakteBody(body)
     })
-        .then(r => r.json())
+        .then(leesJson)
         .finally(() => {
             if (knop) {
                 knop.disabled = false;
@@ -2110,13 +2143,13 @@ function bulkVertrouwen() {
         fetch('markeer_vertrouwd.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'site_id=' + encodeURIComponent(SITE_ID)
+            body: ingepakteBody('site_id=' + encodeURIComponent(SITE_ID)
                 + '&hash=' + encodeURIComponent(hash)
                 + '&naam=' + encodeURIComponent(naam)
                 + '&actie=vertrouw'
-                + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+                + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN))
         })
-            .then(r => r.json())
+            .then(leesJson)
             .then(data => {
                 if (data.ok) {
                     const rij = cb.closest('tr');
@@ -2168,9 +2201,9 @@ function bulkBekijken() {
         return fetch('site_beheer_actie.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
+            body: ingepakteBody(body)
         })
-            .then(r => r.json())
+            .then(leesJson)
             .then(data => ({ pad, data }))
             .catch(err => ({ pad, data: { succes: false, foutmelding: err.message } }));
     })).then(resultaten => {
@@ -2237,9 +2270,9 @@ function bulkActie(actie, bevestigTekst) {
         fetch('site_beheer_actie.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
+            body: ingepakteBody(body)
         })
-            .then(r => r.json())
+            .then(leesJson)
             .then(data => {
                 if (data.succes) {
                     sluitViewerVoorPad(pad);
@@ -2297,9 +2330,9 @@ function bulkRechtenHerstellen() {
         fetch('site_beheer_actie.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
+            body: ingepakteBody(body)
         })
-            .then(r => r.json())
+            .then(leesJson)
             .then(data => {
                 if (!data.succes) {
                     aantalMislukt++;
@@ -2409,13 +2442,13 @@ function wisselVertrouwen(knop) {
     fetch('markeer_vertrouwd.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'site_id=' + encodeURIComponent(SITE_ID)
+        body: ingepakteBody('site_id=' + encodeURIComponent(SITE_ID)
             + '&hash=' + encodeURIComponent(hash)
             + '&naam=' + encodeURIComponent(naam)
             + '&actie=' + actie
-            + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+            + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN))
     })
-    .then(r => r.json())
+    .then(leesJson)
     .then(data => {
         knop.disabled = false;
 
@@ -2468,9 +2501,9 @@ function wisselVertrouwen(knop) {
             knop.textContent = wordtVertrouwd ? '↩️ Niet meer vertrouwen' : '✅ Vertrouwen';
         }
     })
-    .catch(() => {
+    .catch(err => {
         knop.disabled = false;
-        alert('Opslaan is mislukt, controleer de verbinding.');
+        alert('Opslaan is mislukt: ' + err.message);
     });
 }
 
@@ -2487,14 +2520,14 @@ function wisselExtensieVertrouwen(knop) {
     fetch('extensie_bestand_actie.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'site_id=' + encodeURIComponent(SITE_ID)
+        body: ingepakteBody('site_id=' + encodeURIComponent(SITE_ID)
             + '&groep_sleutel=' + encodeURIComponent(groepSleutel)
             + '&relatief_pad=' + encodeURIComponent(pad)
             + '&hash=' + encodeURIComponent(hash)
             + '&actie=' + actie
-            + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+            + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN))
     })
-    .then(r => r.json())
+    .then(leesJson)
     .then(data => {
         knop.disabled = false;
 
@@ -2511,9 +2544,9 @@ function wisselExtensieVertrouwen(knop) {
         // (actief/vertrouwd) terechtkomt zonder de eerdere fade-out-hack.
         location.reload();
     })
-    .catch(() => {
+    .catch(err => {
         knop.disabled = false;
-        alert('Opslaan is mislukt, controleer de verbinding.');
+        alert('Opslaan is mislukt: ' + err.message);
     });
 }
 
@@ -2573,14 +2606,14 @@ function vertrouwCluster(knop) {
         fetch('extensie_bestand_actie.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'site_id=' + encodeURIComponent(SITE_ID)
+            body: ingepakteBody('site_id=' + encodeURIComponent(SITE_ID)
                 + '&groep_sleutel=' + encodeURIComponent(groepSleutel)
                 + '&relatief_pad=' + encodeURIComponent(item.pad)
                 + '&hash=' + encodeURIComponent(item.hash)
                 + '&actie=' + actie
-                + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
+                + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN))
         })
-            .then(r => r.json())
+            .then(leesJson)
             .then(data => {
                 if (!data.ok) {
                     aantalMislukt++;

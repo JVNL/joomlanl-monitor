@@ -34,7 +34,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 $siteId = isset($_POST['site_id']) ? (int) $_POST['site_id'] : 0;
 $actie  = $_POST['actie'] ?? '';
-$toegestaneActies = ['status', 'bekijk', 'quarantaine', 'blokkeer', 'verwijder', 'herstel', 'definitief', 'prullenbak_legen'];
+$toegestaneActies = ['status', 'bekijk', 'quarantaine', 'blokkeer', 'verwijder', 'herstel', 'definitief', 'prullenbak_legen', 'rechten_herstellen'];
 
 if ($siteId <= 0 || !in_array($actie, $toegestaneActies, true)) {
     echo json_encode(['succes' => false, 'foutmelding' => 'Ongeldige aanvraag.']);
@@ -57,8 +57,17 @@ $body = [
     'actie' => $actie,
 ];
 // Alleen de relevante velden meesturen, afhankelijk van de actie.
-if (in_array($actie, ['bekijk', 'quarantaine', 'blokkeer', 'verwijder'], true)) {
-    $body['pad'] = $_POST['pad'] ?? '';
+//
+// Het pad gaat base64-gecodeerd mee als "pad_b64" (sinds 1.37): een leesbaar
+// pad als ".../.htaccess" in de POST werd door de firewall van de
+// hostingpartij (ModSecurity/Imunify360) geweigerd - zie sessie_start.php.
+// Scanscripts van vóór 1.37 kennen "pad_b64" nog niet; die herkennen we aan
+// het ontbreken van de X-Monitor-Padcodering-header in het antwoord, en dan
+// wordt het verzoek hieronder nog één keer met het gewone "pad" gedaan.
+$padOrigineel = null;
+if (in_array($actie, ['bekijk', 'quarantaine', 'blokkeer', 'verwijder', 'rechten_herstellen'], true)) {
+    $padOrigineel = (string) ($_POST['pad'] ?? '');
+    $body['pad_b64'] = base64_encode($padOrigineel);
 }
 if (in_array($actie, ['herstel', 'definitief'], true)) {
     $body['id'] = $_POST['id'] ?? '';
@@ -99,16 +108,37 @@ function verstuurBeheerVerzoek(string $url, array $body): array
         CURLOPT_MAXREDIRS => 5,
         CURLOPT_POSTREDIR => 7,
     ]);
+    // Bijhouden of het scanscript "pad_b64" begrijpt (zie hierboven).
+    $kentPadCodering = false;
+    curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, string $regel) use (&$kentPadCodering) {
+        if (stripos($regel, 'X-Monitor-Padcodering:') === 0) {
+            $kentPadCodering = true;
+        }
+        return strlen($regel);
+    });
     $antwoord = curl_exec($ch);
     $curlErrno = curl_errno($ch);
     $curlFout = curl_error($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    return ['antwoord' => $antwoord, 'curl_errno' => $curlErrno, 'curl_fout' => $curlFout, 'http_code' => $httpCode];
+    return ['antwoord' => $antwoord, 'curl_errno' => $curlErrno, 'curl_fout' => $curlFout, 'http_code' => $httpCode, 'kent_padcodering' => $kentPadCodering];
 }
 
 $poging = verstuurBeheerVerzoek($url, $body);
+
+// Scanscript van vóór 1.37 (kent "pad_b64" niet): nog één keer met het
+// leesbare pad. Zonder geldig pad doet zo'n scanscript niets (veiligPad()
+// weigert een leeg pad), dus de eerste poging heeft geen schade gedaan.
+// Verdwijnt vanzelf zodra het scanscript zichzelf bij de volgende scan heeft
+// bijgewerkt.
+if ($padOrigineel !== null && $poging['curl_errno'] === 0 && !$poging['kent_padcodering']) {
+    $bodyOud = $body;
+    unset($bodyOud['pad_b64']);
+    $bodyOud['pad'] = $padOrigineel;
+    $body = $bodyOud; // ook voor de eventuele ZELF-BIJWERKEN-herhaling hieronder
+    $poging = verstuurBeheerVerzoek($url, $body);
+}
 
 if ($poging['curl_errno'] !== 0) {
     echo json_encode(['succes' => false, 'foutmelding' => "Kon de site niet bereiken: {$poging['curl_fout']}"]);

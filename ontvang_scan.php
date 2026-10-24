@@ -345,6 +345,21 @@ if ($siteId) {
     ");
     $extensiesUpdateStmt->execute([$extensieFout, $siteId]);
 
+    // Sinds 1.37: het scanscript meldt dat er op deze plek geen Joomla-installatie (meer) staat - geen
+    // configuration.php én geen administrator-map, bv. een site die is omgezet naar een statische pagina.
+    // Dan de laatst bekende Joomla-gegevens wissen: zonder dit bleven de Joomla-versie en de extensielijst van
+    // vóór de omzetting staan (een lege extensielijst wordt hieronder bewust gezien als "kon niet ophalen",
+    // niet als "geen extensies", zodat een tijdelijke databasestoring de lijst niet wist). De Joomla-versie
+    // wordt door haal_versies_op.php met COALESCE bijgewerkt, dus blijft na het wissen ook leeg zolang het
+    // manifest niet te vinden is.
+    $geenJoomla = ($data['geen_joomla'] ?? false) === true;
+    if ($geenJoomla) {
+        $pdo->prepare("DELETE FROM site_alle_extensies WHERE site_id = ?")->execute([$siteId]);
+        $pdo->prepare("DELETE FROM site_extensies WHERE site_id = ?")->execute([$siteId]);
+        $pdo->prepare("UPDATE sites SET joomla_versie = NULL WHERE id = ?")->execute([$siteId]);
+        echo "\nOK: geen Joomla-installatie op deze site - Joomla-versie en extensielijst gewist.";
+    }
+
     if (isset($data['geinstalleerde_extensies']) && is_array($data['geinstalleerde_extensies'])) {
 
         // Volledig vervangen: eerst de oude lijst voor deze site weg, dan
@@ -607,7 +622,7 @@ if ($siteId) {
         if ($aantalOverbodigeRijenVerwijderd > 0) {
             echo "\nOK: $aantalOverbodigeRijenVerwijderd overbodige lege catalogus-rij(en) opgeruimd (nergens meer een site die de fallback nodig heeft) - blijven vanzelf gewoon zichtbaar in het extensieoverzicht.";
         }
-    } elseif ($extensieFout !== null) {
+    } elseif ($extensieFout !== null && !$geenJoomla) {
         echo "\nWaarschuwing: extensielijst kon niet worden opgehaald - $extensieFout";
     }
 

@@ -1,5 +1,46 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.37 - 2026-10-24
+
+### Scans op hetzelfde hostingaccount na elkaar (`scan_template.php`, `help.php`)
+Staan twee gemonitorde sites op hetzelfde hostingaccount, dan liepen hun scans bij "alles scannen" tegelijk. Ze deelden dan de snelheid van het account en scanden allebei ook het accountdeel (extra scanpad), waardoor beide tegen de maximale scantijd aanliepen en als onvolledig werden gemeld. Los gescand liep elke site gewoon volledig door.
+
+- **Nieuw: `wachtOpAccountScanSlot()`.** Een scan wacht op een slot in de tijdelijke map van PHP, per hostingaccount, tot maximaal 90 seconden. Daarna start hij toch, met een melding in de ruwe scanuitvoer.
+- Nooit blokkerend: lukt het slot niet, dan start de scan meteen, zoals voorheen.
+- De wachttijd gaat niet af van de scantijd.
+
+### Site zonder Joomla hield de oude Joomla-gegevens (`scan_template.php`, `ontvang_scan.php`, `index.php`, `help.php`)
+Werd een site omgezet naar een statische pagina, dan bleven de Joomla-versie en de extensielijst van daarvoor op de monitor staan, met "Niet up-to-date" als gevolg. Een lege extensielijst wordt bewust gezien als "kon niet ophalen" (zodat een tijdelijke databasestoring niets wist), en de Joomla-versie wordt alleen bijgewerkt als het manifest gevonden wordt.
+
+- **Het scanscript meldt nu `geen_joomla`** als er geen `configuration.php` én geen `administrator`-map is. Alleen een ontbrekende of onleesbare `configuration.php` telt bewust niet.
+- **De monitor wist dan de Joomla-versie en de extensielijst** van die site.
+- **De indexpagina toont "Geen Joomla"** in de kolommen Joomla en Extensies. De beveiligingsscan van de bestanden loopt gewoon door.
+- Super Users en extensies melden in de ruwe scanuitvoer "Geen Joomla-installatie gevonden" in plaats van een databasefout.
+
+### Onjuiste melding "Domein niet in monitor-database" (`scan_template.php`)
+Bevatte het antwoord van de monitor ergens een regel met "Waarschuwing" (bijvoorbeeld over de extensielijst), dan meldde het scanscript dat het domein niet bekend was en het resultaat niet was opgeslagen. Het resultaat was wel opgeslagen.
+
+- Het scanscript kijkt nu eerst of het antwoord met "OK:" begint. "Domein niet in monitor-database" verschijnt alleen nog als de monitor de site echt niet vindt.
+
+### PHP 8.5: meldingen over `curl_close()` (`scan_template.php`)
+Onder PHP 8.5 gaf elke `curl_close()` een deprecation-melding in de ruwe scanuitvoer. De functie doet sinds PHP 8.0 niets meer en wordt nu alleen nog onder PHP 7 aangeroepen.
+
+### "Zoek automatisch" vond het pad van een ander domein (`ftp_detecteer_pad2.php`, `sftp_functies.php`, `help.php`)
+Twee oorzaken:
+
+- **Domeinnamen met één punt werden niet als domein herkend.** De brede zoektocht slaat mappen van andere domeinen op hetzelfde account over, maar de herkenning eiste minstens twee punten in de naam. Gewone domeinen als `voorbeeld.nl` werden daardoor wel doorzocht. Hersteld voor FTP en SFTP.
+- **Een domeinmap zonder `configuration.php` viel terug op de brede zoektocht.** Bij een site die geen Joomla meer is, vond die de `configuration.php` van een ander domein. Nu wordt in dat geval de webroot binnen de domeinmap ingevuld (`public_html`, `httpdocs`, `htdocs` ...), met een waarschuwing om het pad te controleren. Is er ook geen webroot, dan volgt een foutmelding, zonder uit te wijken naar een ander domein.
+
+### Beheeracties op .htaccess-bestanden geblokkeerd door de firewall van de hostingpartij (`sessie_start.php`, `beveiliging.php`, `site_beheer_actie.php`, `scan_template.php`)
+"Bekijk" en "Vertrouwen" bij een .htaccess-vondst gaven "JSON.parse: unexpected character" of "Opslaan is mislukt". Een webapplicatie-firewall (ModSecurity/Imunify360) weigerde het POST-verzoek omdat er een leesbaar pad op `.htaccess` in stond, met een kale 403 en daarna een tijdelijke blokkade van het IP-adres op de hele server. Dezelfde actie op andere bestanden werkte gewoon.
+
+- **De beheeracties sturen hun velden nu gecodeerd mee** (één base64-veld), zodat een firewall geen bestandspaden meer in het verzoek ziet. `sessie_start.php` pakt ze weer uit; de endpoints zelf zijn ongewijzigd. Werkt bij elke hoster, zonder uitzonderingen of whitelists.
+- **Ook het verzoek van de monitor naar het scanscript** stuurt het pad gecodeerd mee. Een scanscript van vóór 1.37 begrijpt dat nog niet; de monitor herkent dat en doet het verzoek dan nog één keer op de oude manier, tot het scanscript zichzelf bij de volgende scan heeft bijgewerkt.
+- **Duidelijkere foutmelding:** komt er geen geldig antwoord terug, dan toont de monitor de HTTP-status en het begin van het antwoord, in plaats van een technische JSON-fout of "controleer de verbinding".
+
+### "Rechten herstellen" werkte niet (`site_beheer_actie.php`)
+De knop gaf altijd "Ongeldige aanvraag", omdat de actie niet in de lijst met toegestane acties stond en het pad niet werd doorgegeven. Beide hersteld.
+
 ## 1.36 - 2026-10-21
 
 ### Super Users in het klantrapport (`klantrapport.php`, `help.php`)

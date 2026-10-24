@@ -1203,9 +1203,19 @@ foreach ($sites as $site) {
     // volledige extensielijst) nog nooit is gelukt. Zonder deze check zou
     // de kolom dan ten onrechte "Niet up-to-date" of "Deels onbekend" tonen
     // op basis van die toevallige, onvolledige gegevens.
+    // Sinds 1.37: het scanscript meldt dat er geen Joomla-installatie (meer) op deze plek staat (bv. omgezet
+    // naar een statische pagina) - zie $geenJoomla in scan_template.php en ontvang_scan.php.
+    $isGeenJoomla = stripos((string) ($site['extensies_fout'] ?? ''), 'Geen Joomla-installatie') === 0;
+
     if ($site['verdacht_aantal'] === null) {
         $extensiesCel = "Nog niet gescand";
         $ernstExtensies = -1;
+    } elseif ($isGeenJoomla) {
+        $extensiesCel = "<span class='grijs' title='" . htmlspecialchars((string) $site['extensies_fout'], ENT_QUOTES) . "'>Geen Joomla</span>";
+        $ernstExtensies = 0;
+        if ($joomlaCel === '') {
+            $joomlaCel = "<span class='grijs'>geen Joomla</span>";
+        }
     } elseif ($heeftGeenEnkeleData) {
         $extensiesCel = "<a class='grijs' href='extensies.php?id=" . (int)$site['id'] . "'>Onbekend</a>";
         $ernstExtensies = 1;

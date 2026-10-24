@@ -211,7 +211,9 @@ function haalMaplijstDiagnose(?array $bijwerken = null): array
  */
 function lijktOpDomeinNaam(string $naam): bool
 {
-    return (bool) preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+\.[a-z]{2,}$/i', $naam);
+    // Sinds 1.37 ook domeinen met maar één punt ("yndi.nl"): de regex eiste er voorheen minstens twee, waardoor
+    // juist de gewone .nl-domeinen niet als "ander klantdomein" werden overgeslagen.
+    return (bool) preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/i', $naam);
 }
 
 /**
@@ -532,6 +534,58 @@ function zoekMapMetGelijkendeNaam($conn, string $pad, string $doelDomein, int $d
     return null;
 }
 
+/**
+ * Sinds 1.37: de webroot binnen de map van dit domein bepalen, voor als daar geen configuration.php (meer) staat -
+ * bv. een site die is omgezet naar een statische pagina. Zonder dit viel de zoektocht terug op een brede zoektocht
+ * vanaf de root van het FTP-account en vond die de configuration.php van een ánder domein op hetzelfde account.
+ * Eerst een gangbare webrootmap in de domeinmap (public_html, httpdocs ...), met de submap van deze site erachter
+ * als die er staat; anders de domeinmap zelf als daar een index-bestand in staat.
+ *
+ * @param callable $lijst function(string $pad): ?array met [naam => isMap] voor de inhoud van een map
+ */
+function bepaalWebrootInDomeinmap(callable $lijst, string $domeinMapPad, string $doelSubmap): ?string
+{
+    $webrootNamen = ['public_html', 'httpdocs', 'htdocs', 'www', 'web', 'public', 'html'];
+
+    $inhoud = $lijst($domeinMapPad);
+    if ($inhoud === null) {
+        return null;
+    }
+    $kleineLetters = [];
+    foreach ($inhoud as $naam => $isMap) {
+        $kleineLetters[strtolower((string) $naam)] = [(string) $naam, $isMap];
+    }
+
+    foreach ($webrootNamen as $webrootNaam) {
+        if (!isset($kleineLetters[$webrootNaam]) || !$kleineLetters[$webrootNaam][1]) {
+            continue;
+        }
+        $webroot = rtrim($domeinMapPad, '/') . '/' . $kleineLetters[$webrootNaam][0];
+        if ($doelSubmap !== '') {
+            foreach (($lijst($webroot) ?? []) as $naam => $isMap) {
+                if ($isMap && strtolower((string) $naam) === strtolower($doelSubmap)) {
+                    return $webroot . '/' . $naam;
+                }
+            }
+        }
+        return $webroot;
+    }
+
+    foreach ($kleineLetters as $klein => [$naam, $isMap]) {
+        if (!$isMap && preg_match('/^index\.(html?|php)$/', $klein)) {
+            return $domeinMapPad;
+        }
+    }
+
+    return null;
+}
+
+function geenJoomlaWebrootWaarschuwing(string $domeinMapPad): string
+{
+    return 'in de map van dit domein ("' . trim(ltrim($domeinMapPad, '.'), '/') . '") staat geen configuration.php - deze site lijkt geen '
+        . 'Joomla (meer) te zijn. Ingevuld is de webroot van het domein; controleer dit voordat je opslaat.';
+}
+
 $host       = trim($_POST['ftp_host'] ?? '');
 $protocol   = ($_POST['ftp_protocol'] ?? 'ftp') === 'sftp' ? 'sftp' : 'ftp';
 $poort      = (int) ($_POST['ftp_poort'] ?? ($protocol === 'sftp' ? 22 : 21));
@@ -600,6 +654,8 @@ if ($protocol === 'sftp') {
         }
 
         $gevondenPad = null;
+        $domeinMapPad = null;
+        $sftpWaarschuwing = null;
 
         // Fase 1: gericht de map met de exacte domeinnaam lokaliseren.
         if ($doelDomein !== '') {
@@ -609,6 +665,31 @@ if ($protocol === 'sftp') {
             if ($domeinMapPad !== null) {
                 $bezochteMappen = 0;
                 $gevondenPad = sftpZoekConfigurationPhp($sftp, $domeinMapPad, 0, $bezochteMappen, $doelDomeinKaal, $doelSubmap);
+            }
+        }
+
+        // Fase 1c (sinds 1.37): domeinmap gevonden, maar geen configuration.php - zie bepaalWebrootInDomeinmap().
+        // In dat geval NIET terugvallen op de brede zoektocht hieronder (die vond een ander domein).
+        if ($gevondenPad === null && $domeinMapPad !== null) {
+            $gevondenPad = bepaalWebrootInDomeinmap(function (string $pad) use ($sftp): ?array {
+                $lijst = $sftp->rawlist($pad);
+                if ($lijst === false) {
+                    return null;
+                }
+                $uit = [];
+                foreach ($lijst as $naam => $info) {
+                    if ($naam !== '.' && $naam !== '..') {
+                        $uit[$naam] = ($info['type'] ?? null) === 2;
+                    }
+                }
+                return $uit;
+            }, $domeinMapPad, $doelSubmap);
+            if ($gevondenPad !== null) {
+                $sftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+            } else {
+                echo json_encode(['succes' => false, 'foutmelding' => 'De map van dit domein is gevonden ("' . trim(ltrim($domeinMapPad, '.'), '/')
+                    . '"), maar daarin staat geen configuration.php en geen herkenbare webroot. Vul het pad handmatig in.']);
+                exit;
             }
         }
 
@@ -649,7 +730,11 @@ if ($protocol === 'sftp') {
         $pad = '/';
     }
 
-    echo json_encode(['succes' => true, 'pad' => $pad]);
+    $sftpRespons = ['succes' => true, 'pad' => $pad];
+    if ($sftpWaarschuwing !== null) {
+        $sftpRespons['waarschuwing'] = $sftpWaarschuwing;
+    }
+    echo json_encode($sftpRespons);
     exit;
 }
 
@@ -675,6 +760,8 @@ if (!@ftp_login($conn, $gebruiker, $wachtwoord)) {
 ftp_pasv($conn, true);
 
 $gevondenPad = null;
+$domeinMapPad = null;
+$ftpWaarschuwing = null;
 
 // Fase 1: gericht de map met de exacte domeinnaam lokaliseren, en ALLEEN
 // daarbinnen naar configuration.php zoeken - voorkomt dat een andere,
@@ -687,6 +774,34 @@ if ($doelDomein !== '') {
     if ($domeinMapPad !== null) {
         $bezochteMappen = 0;
         $gevondenPad = zoekConfigurationPhp($conn, $domeinMapPad, 0, $bezochteMappen, $doelDomeinKaal, $doelSubmap, $host, $poort, $gebruiker, $wachtwoord, $ssl);
+    }
+}
+
+// Fase 1c (sinds 1.37): domeinmap gevonden, maar geen configuration.php - zie bepaalWebrootInDomeinmap(). In dat
+// geval NIET terugvallen op fase 1b/2 hieronder: die vonden de configuration.php van een ander domein op hetzelfde account.
+if ($gevondenPad === null && $domeinMapPad !== null) {
+    $gevondenPad = bepaalWebrootInDomeinmap(function (string $pad) use ($conn, $host, $poort, $gebruiker, $wachtwoord, $ssl): ?array {
+        $rawlist = haalMaplijstMetTerugval($conn, $pad, $host, $poort, $gebruiker, $wachtwoord, $ssl);
+        if ($rawlist === false) {
+            return null;
+        }
+        $uit = [];
+        foreach ($rawlist as $regel) {
+            $delen = preg_split('/\s+/', $regel, 9);
+            $naam = $delen[8] ?? null;
+            if ($naam !== null && $naam !== '.' && $naam !== '..') {
+                $uit[$naam] = ($regel[0] ?? '') === 'd';
+            }
+        }
+        return $uit;
+    }, $domeinMapPad, $doelSubmap);
+    if ($gevondenPad !== null) {
+        $ftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+    } else {
+        ftp_close($conn);
+        echo json_encode(['succes' => false, 'foutmelding' => 'De map van dit domein is gevonden ("' . trim(ltrim($domeinMapPad, '.'), '/')
+            . '"), maar daarin staat geen configuration.php en geen herkenbare webroot. Vul het pad handmatig in.']);
+        exit;
     }
 }
 
@@ -733,6 +848,9 @@ if ($pad === '') {
 }
 
 $respons = ['succes' => true, 'pad' => $pad];
+if ($ftpWaarschuwing !== null) {
+    $respons['waarschuwing'] = $ftpWaarschuwing;
+}
 
 // Waarschuwing: de submap die specifiek bij déze site hoort (bijv.
 // "vmuikit") is wel aangetroffen tijdens het zoeken, maar kon niet

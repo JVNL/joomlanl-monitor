@@ -318,7 +318,10 @@ th {
         💡 Weet je het exacte pad op de server niet zeker (sommige hostingpartijen geven toegang 2-3 mappen boven
         <code>public_html</code>)? Vul dan de server/gebruikersnaam/wachtwoord in en klik op
         <strong>"🔍 Zoek automatisch"</strong> - dit doorzoekt de mappenstructuur zelf naar <code>configuration.php</code>
-        en vult het juiste pad meteen in.
+        en vult het juiste pad meteen in. Staat in de map van het domein geen <code>configuration.php</code> (een site die
+        geen Joomla meer is, bijvoorbeeld omgezet naar een statische pagina), dan wordt de webroot van dat domein ingevuld
+        (bijv. <code>domains/voorbeeld.nl/public_html</code>), met een waarschuwing om het pad te controleren. Er wordt dan
+        nooit uitgeweken naar de map van een ander domein op hetzelfde hostingaccount.
     </div>
 
     <div class="tip">
@@ -538,7 +541,7 @@ th {
 <section id="handmatige-scan">
     <h2>6. Een handmatige scan starten (alle sites)</h2>
     <p>Ga naar de monitorpagina en druk op de knop <strong>"🛡️🔍 Scan en check sites"</strong>. Een voortgangsbalk (0-100%) en leesbare statusteksten laten zien wat er gebeurt. Dit doorloopt automatisch, na elkaar, vier stappen:</p>
-    <div class="stap">1. <strong>Scan starten op alle websites</strong> - <code>scan-en-check-website.php</code> wordt op elke site aangeroepen (backdoor-scan + extensie-inventarisatie), parallel voor alle sites tegelijk. Vlak voordat het eigenlijke scannen van een site begint, wordt bij die site automatisch eerst de eigen <code>tmp</code>-map geleegd - handig omdat deze map vaak juist de plek is waar kortstondige, verdachte bestanden terechtkomen. Dit gebeurt bij elke scan, ook bij "Één site snel opnieuw scannen" (hoofdstuk 5) en handmatige herscans; er is geen aparte knop meer voor nodig.</div>
+    <div class="stap">1. <strong>Scan starten op alle websites</strong> - <code>scan-en-check-website.php</code> wordt op elke site aangeroepen (backdoor-scan + extensie-inventarisatie), parallel voor alle sites tegelijk. Vlak voordat het eigenlijke scannen van een site begint, wordt bij die site automatisch eerst de eigen <code>tmp</code>-map geleegd - handig omdat deze map vaak juist de plek is waar kortstondige, verdachte bestanden terechtkomen. Dit gebeurt bij elke scan, ook bij "Één site snel opnieuw scannen" (hoofdstuk 5) en handmatige herscans; er is geen aparte knop meer voor nodig. Staan meerdere gemonitorde sites op hetzelfde hostingaccount, dan scant het scanscript ze na elkaar in plaats van tegelijk: een scan wacht tot maximaal 90 seconden op een andere scan op hetzelfde account (de ruwe scanuitvoer meldt hoe lang). Zo delen ze niet de snelheid van het account en lopen ze niet allebei tegen de maximale scantijd aan.</div>
     <div class="stap">2. <strong>Even wachten</strong> (20 seconden, aftellend zichtbaar) - zodat de sites de tijd krijgen om de scan af te ronden en het resultaat terug te sturen.</div>
     <div class="stap">3. <strong>Website- en SSL-status controleren, Joomla-/extensieversies ophalen</strong> - inclusief "is dit de nieuwste versie?" en het favicon van elke site.</div>
     <div class="stap">4. <strong>Extensiebestanden tussen sites vergelijken</strong> - zie hoofdstuk 9.</div>
@@ -903,6 +906,7 @@ th {
         <tr><td><span class="badge badge-grijs">Deels onbekend</span></td><td>Geen enkele bevestigd-verouderde extensie, maar ook niet alles bevestigd up-to-date (mix van up-to-date en onbekend).</td></tr>
         <tr><td><span class="badge badge-rood">Niet up-to-date</span></td><td>Er is minstens één extensie waarvan een nieuwere versie beschikbaar is dan wat er nu geïnstalleerd is.</td></tr>
         <tr><td><span class="badge badge-grijs">Onbekend</span></td><td>Er kon geen nieuwste versie worden bepaald (geen update-locatie bekend, of het ophalen ervan mislukte).</td></tr>
+        <tr><td><span class="badge badge-grijs">Geen Joomla</span></td><td>Op de plek van de site staat geen Joomla-installatie (meer): geen <code>configuration.php</code> en geen <code>administrator</code>-map, bijvoorbeeld na het omzetten naar een statische pagina. De laatst bekende Joomla-versie en extensielijst zijn dan gewist; de beveiligingsscan van de bestanden loopt gewoon door.</td></tr>
     </table>
     <p>Onder de status van de extensiekolom staat, als er iets te melden is, een korte uitsplitsing zoals <code>2 verouderd, 3 onbekend</code> - is alles in orde, dan blijft die tweede regel gewoon weg.</p>
 

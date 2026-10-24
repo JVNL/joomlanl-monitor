@@ -876,6 +876,17 @@ $beheerActies = ['status', 'bekijk', 'quarantaine', 'blokkeer', 'verwijder', 'he
 
 if (isset($_POST['actie']) && in_array($_POST['actie'], $beheerActies, true)) {
     header('Content-Type: application/json; charset=utf-8');
+    // Sinds 1.37 stuurt de monitor het pad base64-gecodeerd mee als
+    // "pad_b64", omdat firewalls (ModSecurity/Imunify360) een leesbaar pad
+    // als ".../.htaccess" in een POST weigeren. Deze header laat de monitor
+    // weten dat dit scanscript dat begrijpt; oudere scanscripts sturen hem
+    // niet, en dan valt de monitor terug op het gewone "pad".
+    header('X-Monitor-Padcodering: 1');
+    if (isset($_POST['pad_b64'])) {
+        $gedecodeerdPad = base64_decode((string) $_POST['pad_b64'], true);
+        $_POST['pad'] = $gedecodeerdPad === false ? '' : $gedecodeerdPad;
+        unset($gedecodeerdPad);
+    }
 
     if (!isset($_POST['geheime_code']) || !hash_equals($geheimeCode, (string) $_POST['geheime_code'])) {
         http_response_code(403);
@@ -4892,7 +4903,7 @@ function haalUrlEenvoudig($url, $timeoutSeconden = 8)
 
         $inhoud   = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) { curl_close($ch); } // sinds PHP 8.0 zonder effect, in 8.5 deprecated
 
         // Gelukt, of juist geblokkeerd: geen tweede poging.
         $gelukt = $inhoud !== false && $inhoud !== '' && $httpCode >= 200 && $httpCode < 300;
@@ -4972,7 +4983,7 @@ function haalUrlsParallelEenvoudig(array $urls, int $timeoutSeconden = 10): arra
         }
 
         curl_multi_remove_handle($multiHandle, $ch);
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) { curl_close($ch); } // sinds PHP 8.0 zonder effect, in 8.5 deprecated
     }
 
     curl_multi_close($multiHandle);
@@ -5896,7 +5907,7 @@ if ($ditIsEenZelfherhaling) {
         curl_setopt_array($ch, $herhaalOpties);
         $herhaalAntwoord = curl_exec($ch);
         $herhaalFout = curl_error($ch);
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) { curl_close($ch); } // sinds PHP 8.0 zonder effect, in 8.5 deprecated
 
         if ($herhaalAntwoord !== false && $herhaalAntwoord !== '') {
             echo $herhaalAntwoord;
@@ -5905,6 +5916,61 @@ if ($ditIsEenZelfherhaling) {
         }
         exit;
     }
+}
+
+/**
+ * Eén scan tegelijk per hostingaccount (sinds 1.37). De monitor start alle sites tegelijk (start_scan.php,
+ * curl_multi). Staan twee sites op hetzelfde hostingaccount, dan delen hun scans de CPU-/IO-limiet van dat
+ * account (bij CloudLinux de LVE), en scannen ze allebei ook nog het accountdeel (extra scanpad). Elk krijgt
+ * dan ongeveer de helft van de snelheid en loopt tegen de tijdsgrens van de bestandsscan aan - terwijl elk
+ * afzonderlijk ruim op tijd klaar is (aanleiding oktober 2026: twee subdomeinen op één account, bij elke
+ * nachtscan onvolledig, handmatig los steeds volledig; met twee tabbladen tegelijk te reproduceren).
+ *
+ * Daarom wacht een scan hier op een slot (flock) in de tijdelijke map van PHP, per gebruiker (uid). Onder
+ * CageFS heeft elk account zijn eigen tijdelijke map; op een server zonder CageFS onderscheidt de uid in de
+ * bestandsnaam de accounts. Het slot geldt tot het einde van dit verzoek (PHP geeft het dan vanzelf vrij).
+ *
+ * Nooit blokkerend: lukt het slot niet (tijdelijke map niet bruikbaar), of is het na $maxWachtSeconden nog
+ * steeds bezet, dan start de scan gewoon, zoals voorheen, met een regel in de uitvoer.
+ *
+ * @return array{handle: resource|null, melding: string}
+ */
+function wachtOpAccountScanSlot(int $maxWachtSeconden): array
+{
+    $resultaat = ['handle' => null, 'melding' => ''];
+
+    $uid = function_exists('posix_geteuid') ? (int) @posix_geteuid() : (int) @getmyuid();
+    $tmpMap = rtrim((string) @sys_get_temp_dir(), '/\\');
+    if ($tmpMap === '' || !@is_dir($tmpMap) || !@is_writable($tmpMap)) {
+        $resultaat['melding'] = 'Account-scanslot: niet beschikbaar (tijdelijke map van PHP niet beschrijfbaar) - scan start meteen.';
+        return $resultaat;
+    }
+
+    $handle = @fopen($tmpMap . '/jvnl-monitor-scanslot-' . $uid . '.lock', 'c');
+    if ($handle === false) {
+        $resultaat['melding'] = 'Account-scanslot: niet beschikbaar (slotbestand niet te openen) - scan start meteen.';
+        return $resultaat;
+    }
+
+    $start = microtime(true);
+    while (!@flock($handle, LOCK_EX | LOCK_NB)) {
+        $gewacht = microtime(true) - $start;
+        if ($gewacht >= $maxWachtSeconden) {
+            @fclose($handle);
+            $resultaat['melding'] = sprintf('Account-scanslot: na %d s nog steeds bezet door een andere scan op dit hostingaccount - '
+                . 'scan start toch, en kan daardoor de tijdsgrens raken.', (int) round($gewacht));
+            return $resultaat;
+        }
+        usleep(500000);
+    }
+
+    $resultaat['handle'] = $handle;
+    $gewacht = microtime(true) - $start;
+    if ($gewacht >= 1) {
+        $resultaat['melding'] = sprintf('Account-scanslot: %d s gewacht tot een andere scan op hetzelfde hostingaccount klaar was.', (int) round($gewacht));
+    }
+
+    return $resultaat;
 }
 
 echo "=== JOOMLA BACKDOOR-SCAN (v10) ===\n";
@@ -5923,6 +5989,17 @@ $verversCode = isset($_GET['nc']) ? substr(preg_replace('/[^A-Za-z0-9]/', '', (s
 if ($verversCode !== '') {
     echo "Ververs-code: " . $verversCode . "\n";
 }
+
+// Wachten op een eventuele andere scan op hetzelfde hostingaccount (zie wachtOpAccountScanSlot()). De monitor
+// verbreekt de verbinding al na 30 seconden; de scan moet dan gewoon doorlopen en zijn resultaat zelf naar de
+// monitor sturen. Daarna de tijdslimiet opnieuw zetten, zodat het wachten niet van de scantijd afgaat. De
+// tijdsgrens van de bestandsscan zelf begint pas bij de eerste map te lopen, dus ook na het wachten.
+@ignore_user_abort(true);
+$accountScanSlot = wachtOpAccountScanSlot(90);
+if ($accountScanSlot['melding'] !== '') {
+    echo $accountScanSlot['melding'] . "\n";
+}
+@set_time_limit(120);
 
 // Vóór het eigenlijke scannen begint: de tmp-map alvast automatisch legen.
 // Deze map is vaak juist de plek waar kortstondige, verdachte bestanden
@@ -6467,6 +6544,13 @@ voegInhoudVingerafdrukkenToe($rootLevelUnknown, $aantalVingerafdrukken);
 // databaseverbinding. Wordt netjes overgeslagen als dat om wat voor reden
 // dan ook niet lukt (bijv. afwijkende serverconfiguratie).
 $databaseVondsten = [];
+// Geen Joomla-installatie meer op deze plek (bv. omgezet naar een statische pagina): geen configuration.php én geen
+// administrator-map. Bewust beide: alleen een ontbrekende of onleesbare configuration.php (bv. hernoemd bij een hack,
+// of een rechtenprobleem) is géén reden om de Joomla-gegevens van de site op de monitor te wissen. De monitor maakt
+// bij deze vlag de Joomla-versie en de extensielijst van de site leeg (zie ontvang_scan.php), in plaats van de
+// laatst bekende Joomla-gegevens te laten staan.
+$geenJoomla = !file_exists($startMap . '/configuration.php') && !is_dir($startMap . '/administrator');
+$geenJoomlaTekst = 'Geen Joomla-installatie gevonden (geen configuration.php en geen administrator-map)';
 $dbVerbinding = verbindMetJoomlaDatabase($startMap);
 scanRogueSuperUsers($dbVerbinding, $databaseVondsten);
 scanTemplateDefacement($dbVerbinding, $databaseVondsten);
@@ -6478,6 +6562,12 @@ $superUsersResultaat = haalSuperUsers($dbVerbinding);
 
 // Geïnstalleerde extensies uitlezen via de eigen database van de site
 $extensieResultaat = haalGeinstalleerdeExtensies($dbVerbinding, $startMap, $startTime);
+
+// Bij een site zonder Joomla een duidelijke melding in plaats van "geen databaseverbinding".
+if ($geenJoomla) {
+    $superUsersResultaat = ['fout' => $geenJoomlaTekst];
+    $extensieResultaat = ['fout' => $geenJoomlaTekst];
+}
 
 $duration = time() - $startTime;
 
@@ -6628,6 +6718,8 @@ $payload = [
     'super_users_fout' => $superUsersResultaat['fout'] ?? null,
     'php_versie' => PHP_VERSION,
     'extensies_fout' => $extensieResultaat['fout'] ?? null,
+    // Sinds 1.37: de monitor wist dan de Joomla-versie en de extensielijst van deze site (zie $geenJoomla).
+    'geen_joomla' => $geenJoomla,
     'extensie_bestand_hashes' => $extensieResultaat['bestand_hashes'] ?? null,
     'feed_geblokkeerde_hosts' => array_keys($extensieResultaat['diagnose']['geblokkeerde_hosts'] ?? []),
     'feed_proef_inhoud' => $extensieResultaat['diagnose']['proef_feeds'] ?? [],
@@ -6675,7 +6767,7 @@ function stuurScanresultaatNaarMonitor(string $json, int $maxSeconden): array
         'http' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
         'seconden' => round((float) curl_getinfo($ch, CURLINFO_TOTAL_TIME), 1),
     ];
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) { curl_close($ch); } // sinds PHP 8.0 zonder effect, in 8.5 deprecated
 
     return $resultaat;
 }
@@ -6717,13 +6809,16 @@ if ($antwoord === false) {
 } elseif ($httpCode !== 200) {
     echo "❌ FOUT: monitor gaf HTTP {$httpCode} terug\n";
     echo "    Antwoord: {$antwoord}\n";
-} elseif (strpos($antwoord, 'niet gevonden') !== false || strpos($antwoord, 'onbekend') !== false || stripos($antwoord, 'waarschuwing') !== false) {
+} elseif (stripos($antwoord, 'OK:') === 0) {
+    // Eerst op "OK:" aan het begin controleren: het antwoord kan daarna nog regels met "Waarschuwing:" bevatten
+    // (bv. over de extensielijst) terwijl het scanresultaat zelf wél is opgeslagen. Voorheen won de controle op
+    // "waarschuwing" ergens in het antwoord, met de onjuiste melding "Domein niet in monitor-database" tot gevolg.
+    echo "Naar monitor gestuurd ✓\n";
+    echo "    Antwoord: {$antwoord}\n";
+} elseif (stripos($antwoord, 'geen site gevonden') !== false) {
     echo "ℹ️  Domein niet in monitor-database\n";
     echo "    Antwoord: {$antwoord}\n";
     echo "    (Scan gegevens worden NIET opgeslagen op monitor)\n";
-} elseif (stripos($antwoord, 'OK:') === 0) {
-    echo "Naar monitor gestuurd ✓\n";
-    echo "    Antwoord: {$antwoord}\n";
 } else {
     echo "⚠️  Onverwacht antwoord van monitor:\n";
     echo "    {$antwoord}\n";
@@ -6843,7 +6938,7 @@ function doeZelfBijwerkVerzoek(array $payload): ?array
     ]);
 
     $antwoord = curl_exec($ch);
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) { curl_close($ch); } // sinds PHP 8.0 zonder effect, in 8.5 deprecated
 
     if ($antwoord === false) {
         return null;

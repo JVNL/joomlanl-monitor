@@ -308,7 +308,8 @@ function sftpZoekMapMetGelijkendeNaam(SFTP $sftp, string $pad, string $doelDomei
  */
 function sftpLijktOpDomeinNaam(string $naam): bool
 {
-    return (bool) preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+\.[a-z]{2,}$/i', $naam);
+    // Sinds 1.37 ook domeinen met maar één punt ("yndi.nl") - zie lijktOpDomeinNaam() in ftp_detecteer_pad2.php.
+    return (bool) preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/i', $naam);
 }
 
 /**

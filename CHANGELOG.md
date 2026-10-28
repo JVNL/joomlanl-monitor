@@ -1,5 +1,17 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.39 - 2026-10-28
+
+### Nieuw: droppers herkennen (`scan_template.php`)
+Een bestand dat verstopte PHP-code als letterlijke base64- of hex-reeks meedraagt en die als bestand wegschrijft, werd niet gemeld zolang er geen `eval()` of verzoekinvoer (`$_POST`/`$_GET` e.d.) in stond. Base64 telde alleen mee in combinatie daarmee. Zo'n "dropper" zet een opgeruimde achterdeur steeds opnieuw neer.
+
+- **Nieuw: `detecteerDropper()` (PATROON 30).** Gemeld als "DROPPER ... BACKDOOR PATROON" (HOOG · 90) als het bestand naar een bestand schrijft (`file_put_contents`/`fwrite`/`fputs`) én een letterlijke reeks bevat die na decoderen PHP-code is.
+- Gedecodeerd wordt base64 (ook omgekeerd, voor `strrev()`) en hex (voor `hex2bin()`/`pack('H*')`), en daarna eventueel nog gzip (`gzinflate`/`gzuncompress`/`gzdecode`). Er wordt niets uitgevoerd.
+- "PHP-code" betekent een `<?php`- of `<?=`-opening, of een aanroep van bijv. `eval`, `assert`, `system`, `exec` of `move_uploaded_file`.
+- Een reeks die naar iets anders dan PHP decodeert (bijv. een meegeleverde `.htaccess`) telt bewust niet mee.
+- De melding toont het begin van de verstopte code, zodat duidelijk is wat er steeds wordt teruggezet. Wordt ook toegevoegd als het bestand al om een andere reden gemeld is.
+- Gecontroleerd op het volledige Joomla 5.4-pakket en Kunena: geen meldingen.
+
 ## 1.38 - 2026-10-28
 
 ### Bestanden met inloggegevens in de website-root (`scan_template.php`)

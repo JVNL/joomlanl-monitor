@@ -2319,6 +2319,91 @@ function heeftVermomdeInclude(string $code): bool
 }
 
 /**
+ * Herkent een "dropper": een bestand dat verstopte PHP-code (als letterlijke base64- of hex-reeks in de broncode) weer
+ * leesbaar maakt en als bestand op de server wegschrijft. Er hoeft daarbij geen eval() en geen verzoekinvoer aan te pas
+ * te komen, dus de bestaande patronen (die base64 alleen i.c.m. eval of $_POST/$_GET meetellen) zagen dit niet. Typisch
+ * gebruik: een opgeruimde achterdeur bij elke paginaweergave of via cron opnieuw neerzetten.
+ *
+ * Voorwaarden (allebei nodig):
+ *  - het bestand schrijft naar een bestand (file_put_contents/fwrite/fputs);
+ *  - er staat een letterlijke reeks in die na decoderen PHP-code is: base64 (ook omgekeerd, voor strrev()), hex (voor
+ *    hex2bin()/pack('H*')), en ook als die reeks daarna nog met gzinflate/gzuncompress/gzdecode uitgepakt moet worden.
+ *    "PHP-code" = een <?php- of <?=-opening, of een aanroep van eval/assert/system/exec/shell_exec/passthru/popen/
+ *    proc_open/create_function/move_uploaded_file.
+ *
+ * Bewust NIET: decoderen naar iets anders dan PHP. Bijv. een agent die zijn eigen .htaccess als base64 meedraagt en
+ * wegschrijft is geen dropper van code (aanleiding oktober 2026: een externe virusscanner maakte zo'n legitiem bestand
+ * leeg). Er wordt NIETS uitgevoerd; alleen gedecodeerd en bekeken.
+ *
+ * @return string|null korte leesbare proef van de gevonden PHP-payload, of null
+ */
+function detecteerDropper(string $inhoud): ?string
+{
+    if (!preg_match('/\b(?:file_put_contents|fwrite|fputs)\s*\(/i', $inhoud)) {
+        return null;
+    }
+
+    $isPhp = function (string $s): bool {
+        return (bool) (preg_match('/<\?(?:php\b|=)/i', $s)
+            || preg_match('/\b(?:eval|assert|system|exec|shell_exec|passthru|popen|proc_open|create_function|move_uploaded_file)\s*\(/i', $s));
+    };
+    // Een gedecodeerde reeks kan nog gecomprimeerd zijn (gzinflate(base64_decode(...))): dan ook dat proberen.
+    $varianten = function (string $s): array {
+        $uit = [$s];
+        foreach (['gzinflate', 'gzuncompress', 'gzdecode'] as $f) {
+            if (function_exists($f)) {
+                $u = @$f($s);
+                if (is_string($u) && $u !== '') {
+                    $uit[] = $u;
+                }
+            }
+        }
+        return $uit;
+    };
+    $proef = function (string $s): string {
+        $s = preg_replace('/\s+/', ' ', substr($s, 0, 300));
+        $s = preg_replace('/[^\x20-\x7E]/', '?', $s);
+        return substr(trim($s), 0, 90);
+    };
+
+    $kandidaten = [];
+    if (preg_match_all('/[A-Za-z0-9+\/]{40,}={0,2}/', $inhoud, $t)) {
+        foreach (array_slice(array_unique($t[0]), 0, 60) as $reeks) {
+            if (strlen($reeks) > 2000000) {
+                continue;
+            }
+            foreach ([$reeks, strrev($reeks)] as $r) {
+                $d = base64_decode($r, true);
+                if ($d === false) {
+                    $d = base64_decode(substr($r, 0, strlen($r) - (strlen($r) % 4)), true);
+                }
+                if (is_string($d) && $d !== '') {
+                    $kandidaten[] = $d;
+                }
+            }
+        }
+    }
+    if (preg_match_all('/(?:[0-9a-fA-F]{2}){20,}/', $inhoud, $t)) {
+        foreach (array_slice(array_unique($t[0]), 0, 30) as $reeks) {
+            $d = @hex2bin($reeks);
+            if (is_string($d) && $d !== '') {
+                $kandidaten[] = $d;
+            }
+        }
+    }
+
+    foreach ($kandidaten as $d) {
+        foreach ($varianten($d) as $v) {
+            if ($isPhp($v)) {
+                return $proef($v);
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
  * Herkent een "lader": een regel code die zelf weinig doet, maar een elders verstopt bestand (de payload) laadt en
  * uitvoert. Kenmerken uit de praktijk (september 2026, tientallen laders op één site):
  *  - eval('goto L_xxxxxx; ...') - de code is opgeknipt in stukjes met goto-sprongen ertussen, zodat de volgorde
@@ -3136,6 +3221,21 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         && preg_match('/fwrite\s*\(/i', $inhoud)) {
         $reden = 'Wachtwoord-hash (md5 van een verzoekparameter vergeleken met een vaste hash) i.c.m. een bestand schrijven met een naam uit het verzoek - verborgen bestandsschrijver, UPLOAD BACKDOOR PATROON';
         $verdacht = true;
+    }
+
+    // PATROON 30: dropper - verstopte PHP-code (base64/hex, evt. omgekeerd of gecomprimeerd) die naar een bestand
+    // wordt weggeschreven, zonder eval() of verzoekinvoer. Zie detecteerDropper(). Ook toegevoegd als het bestand al om
+    // een andere reden is gemeld: de proef van de payload helpt bij het opruimen (wat zet hij steeds terug?).
+    $dropperProef = detecteerDropper($inhoud);
+    if ($dropperProef !== null) {
+        $dropperReden = 'DROPPER - bevat verstopte PHP-code (base64/hex) en schrijft naar een bestand: zet een achterdeur (opnieuw) neer, '
+            . 'ook nadat die is opgeruimd. Begin van de verstopte code: "' . $dropperProef . '", BACKDOOR PATROON';
+        if ($verdacht) {
+            $reden .= ' [+ ' . $dropperReden . ']';
+        } else {
+            $reden = $dropperReden;
+            $verdacht = true;
+        }
     }
 
     // PATROON 27: bekende, complete remote-beheerscripts (zie detecteerBekendRemoteBeheerscript()).

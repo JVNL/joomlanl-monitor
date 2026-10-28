@@ -14,6 +14,25 @@ require_once 'ftp_rechten_functies.php';
 $foutmelding   = '';
 $succesmelding = '';
 
+// De scanscript-bestandsnaam wordt al bij het openen van dit formulier
+// gegenereerd (en via een verborgen veld meegestuurd), zodat hij al vóór
+// het opslaan in de Admin Tools-instructies getoond kan worden - die
+// uitzondering moet je juist eerst instellen. Bij het opslaan wordt alleen
+// een naam overgenomen die exact het formaat van deze monitor heeft;
+// anders (of bij een ontbrekend veld) wordt alsnog een nieuwe gegenereerd.
+$voorgesteldeScanBestandsnaam = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $kandidaat = (string) ($_POST['scan_bestandsnaam_voorstel'] ?? '');
+    $verwachtPrefix = 'scan-door-' . normaliseerMonitorNaamVoorBestand((string) haalInstelling($pdo, 'email_afzendernaam', '')) . '-';
+    if (strpos($kandidaat, $verwachtPrefix) === 0
+        && preg_match('/^[a-f0-9]{6}\.php$/', substr($kandidaat, strlen($verwachtPrefix)))) {
+        $voorgesteldeScanBestandsnaam = $kandidaat;
+    }
+}
+if ($voorgesteldeScanBestandsnaam === '') {
+    $voorgesteldeScanBestandsnaam = genereerUniekeScanBestandsnaam($pdo);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     vereistGeldigCsrfToken();
 
@@ -54,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // bij Site-instellingen, bewust vast en is niet meer los in te
         // vullen; wijzigen kan later alleen nog via de "Vervang door
         // nieuwe naam"-knop bij Site-instellingen.
-        $scanBestandsnaamInvoer = genereerUniekeScanBestandsnaam($pdo);
+        $scanBestandsnaamInvoer = $voorgesteldeScanBestandsnaam;
 
         try {
             $stmt = $pdo->prepare("
@@ -451,13 +470,12 @@ label.categorie-optie {
 <div id="akeeba-advies" class="advies" style="display: none;">
     <h2>💡 Pas dit eerst aan als je Akeeba Admin Tools gebruikt</h2>
     <div class="waarschuwing" style="margin-bottom: 12px;">
-        ⚠️ Elke site heeft een eigen, uniek gegenereerde scanscript-bestandsnaam (zie hoofdstuk 9 van de
-        helppagina) - die ken je dus nog niet vóórdat je deze site hieronder hebt toegevoegd. Doorloop dit
-        stappenplan daarom in twee delen: stap 1 t/m 4 (het IP-adres) kun je nu alvast doen, maar kom na het
-        toevoegen van de site terug voor stap 5 t/m 9, met de daadwerkelijke bestandsnaam die je bij
-        Site-instellingen van deze site te zien krijgt. <strong>Wijzig je die bestandsnaam later ooit</strong>
-        (via "Vervang door nieuwe naam", of de migratieknop op de configuratiepagina), dan moet je stap 5 t/m 9
-        ook opnieuw doen met de nieuwe naam - anders blokkeert Admin Tools het scanscript alsnog.
+        ⚠️ Elke site heeft een eigen, uniek gegenereerde scanscript-bestandsnaam. De naam voor deze site staat
+        hieronder al ingevuld; laat deze pagina daarom open tot je de site hebt toegevoegd (herladen geeft een
+        nieuwe naam). <strong>Wijzig je die bestandsnaam later ooit</strong> (via "Vervang door nieuwe naam" bij
+        Site-instellingen), dan moet je de laatste stappen opnieuw doen met de nieuwe naam - anders blokkeert
+        Admin Tools het scanscript alsnog. Dit stappenplan staat ook op de
+        <a href="help.php#admin-tools" target="_blank">helppagina</a>, zodat je het later terug kunt vinden.
     </div>
     <ol>
         <li>Zoek het IPv4- en IPv6-adres op van de monitorwebsite.</li>
@@ -469,7 +487,7 @@ label.categorie-optie {
         <li><strong>Backend directories where file type exceptions are allowed</strong> — maak daar een nieuwe regel aan voor <code>administrator</code> en plaats daarachter <code>manifests</code>.</li>
         <li>Daaronder staat <strong>Backend file types allowed in selected directories</strong> — type daar <code>xml</code> en druk op Enter om te bevestigen.</li>
         <li>Scroll verder naar beneden tot <strong>Exceptions from Server Protection</strong> → <strong>Allow direct access to these files</strong>.</li>
-        <li>Maak daar een nieuwe regel aan en zet in die regel de <strong>exacte, unieke scanscript-bestandsnaam van deze site</strong> (te vinden bij Site-instellingen, ná het toevoegen) - dus niet zomaar <code>scan-en-check-website.php</code>, tenzij dat toevallig ook echt de naam is die daar staat.</li>
+        <li>Maak daar een nieuwe regel aan en zet in die regel de scanscript-bestandsnaam van deze site: <code><?php echo htmlspecialchars($voorgesteldeScanBestandsnaam); ?></code>. Deze naam is speciaal voor deze site gegenereerd en wordt bij het opslaan vastgelegd (je ziet 'm daarna ook terug bij Site-instellingen). Herlaad je deze pagina, dan krijg je een nieuwe naam.</li>
         <li>Sla al deze wijzigingen op door linksboven te klikken op de knop <strong>"Save and Create .htaccess"</strong>.</li>
     </ol>
 </div>
@@ -480,6 +498,7 @@ label.categorie-optie {
 
 <form method="post">
     <?php echo csrfVeld(); ?>
+    <input type="hidden" name="scan_bestandsnaam_voorstel" value="<?php echo htmlspecialchars($voorgesteldeScanBestandsnaam); ?>">
 
     <div class="formulier-kop">📝 Gegevens van de nieuwe website</div>
 
@@ -523,8 +542,8 @@ label.categorie-optie {
     <input type="text" id="url_subpad" name="url_subpad" placeholder="(meestal leeg laten)" value="<?php echo htmlspecialchars($_POST['url_subpad'] ?? ''); ?>">
 
     <div class="uitleg" style="margin-top: 15px;">
-        <strong>Scanscript-bestandsnaam:</strong> wordt automatisch en uniek gegenereerd op basis van de domeinnaam
-        (bijv. <code>scan-door-compactwebmonitor-a3f9c2.php</code>) - dat is veiliger dan een vaste naam die op elke site
+        <strong>Scanscript-bestandsnaam:</strong> wordt automatisch en uniek gegenereerd op basis van de naam van deze
+        monitor, aangevuld met een willekeurig deel (voor deze site wordt dat <code><?php echo htmlspecialchars($voorgesteldeScanBestandsnaam); ?></code>) - dat is veiliger dan een vaste naam die op elke site
         hetzelfde is. Deze naam staat na het opslaan vast; je ziet 'm terug bij Site-instellingen, waar je 'm
         desgewenst later nog kan vervangen door een nieuwe, opnieuw automatisch gegenereerde naam.
     </div>
@@ -587,7 +606,7 @@ label.categorie-optie {
 
     <label for="ftp_pad">Pad op de server</label>
     <div class="uitleg">
-        De map waar <code>scan-en-check-website.php</code> in geplaatst moet worden (dezelfde map als
+        De map waar het scanscript in geplaatst moet worden (dezelfde map als
         <code>configuration.php</code> van Joomla), bijv. <code>/public_html</code> of gewoon <code>/</code>.
         Weet je dit niet zeker (sommige hostingpartijen geven toegang 2-3 mappen boven <code>public_html</code>)?
         Vul dan hierboven de gegevens in en klik op de zoekknop.

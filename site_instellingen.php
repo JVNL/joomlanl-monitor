@@ -561,8 +561,8 @@ label.categorie-optie {
         ⚠️ Gebruikt deze site <strong>Akeeba Admin Tools</strong> (of een vergelijkbare firewall-plugin met een
         bestandsnaam-uitzonderingslijst)? Vervang je de naam hieronder, dan moet je de bestaande uitzondering voor
         de <em>oude</em> naam vervangen door een nieuwe voor de naam die je hierna te zien krijgt - anders blokkeert
-        de firewall het scanscript alsnog, ook al staat het correct op de site. Zie hoofdstuk 3 van de helppagina
-        voor het volledige stappenplan.
+        de firewall het scanscript alsnog, ook al staat het correct op de site. Zie
+        <a href="help.php#admin-tools" target="_blank">Akeeba Admin Tools op de helppagina</a> voor het volledige stappenplan.
     </div>
 
     <label>Huidige bestandsnaam</label>

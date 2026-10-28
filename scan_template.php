@@ -1,4 +1,6 @@
 <?php
+// VINGERAFDRUK - JOOMLANL_MONITOR_SCANSCRIPT_9f3c7a1e2b4d - zie isEigenScanScriptInhoud()
+// OUDE VINGERAFDRUK (overgang, mag weg vanaf 1.39) - COMPACTWEB_MONITOR_SCANSCRIPT_9f3c7a1e2b4d
 // scan-en-check-website.php (voorheen scan_verdacht_v11.php)
 // Focus: Backdoors + root-level onbekende mappen + volledige extensielijst
 // Uitbreiding t.o.v. v4: dynamische functie-aanroepen, upload-backdoors,
@@ -64,7 +66,7 @@ $geheimeCode = '__GEHEIME_CODE__';
 // map is.
 $startMap = realpath(__DIR__) ?: __DIR__;
 
-// VINGERAFDRUK - COMPACTWEB_MONITOR_SCANSCRIPT_9f3c7a1e2b4d - deze exacte
+// VINGERAFDRUK (zie de tweede regel van dit bestand) - deze exacte
 // regel staat, ongewijzigd, in ELK scanscript dat ooit uit dit sjabloon is
 // gegenereerd (ongeacht bestandsnaam, monitor-installatie of geheime code).
 // Wordt gebruikt om zulke scanscripts betrouwbaar als "eigen/vertrouwd" te
@@ -72,9 +74,153 @@ $startMap = realpath(__DIR__) ?: __DIR__;
 // dezelfde site door meerdere monitor-installaties wordt beheerd (elk met
 // een eigen, willekeurig gegenereerde bestandsnaam), of na een handmatige
 // FTP-herupload met een nieuw volgnummer. Zie isEigenScanScriptInhoud().
+//
+// De vingerafdruk staat bewust helemaal bovenaan: bij de root-level-controle
+// wordt alleen het begin van een bestand (4096 bytes) gelezen.
+//
+// Overgang (1.38): de vingerafdruk heette eerder COMPACTWEB_MONITOR_SCANSCRIPT_.
+// Beide worden herkend, en de oude staat als tweede regel ook nog in dit
+// bestand, zodat oude en nieuwe scanscripts elkaar wederzijds herkennen
+// zolang nog niet elke site is bijgewerkt. De oude regel en de oude naam
+// hieronder mogen weg zodra alle scanscripts zichzelf hebben bijgewerkt.
 function isEigenScanScriptInhoud($inhoud)
 {
-    return strpos((string) $inhoud, 'COMPACTWEB_MONITOR_SCANSCRIPT_9f3c7a1e2b4d') !== false;
+    $inhoud = (string) $inhoud;
+    return strpos($inhoud, 'JOOMLANL_MONITOR_SCANSCRIPT_9f3c7a1e2b4d') !== false
+        || strpos($inhoud, 'COMPACTWEB_MONITOR_SCANSCRIPT_9f3c7a1e2b4d') !== false;
+}
+
+/**
+ * Wijst de bestandsnaam op een bestand met inloggegevens? De naam wordt
+ * (zonder extensie) in woorden gesplitst op alles wat geen letter of cijfer
+ * is. Korte afkortingen ("ww", "pw", "ftp") tellen alleen als los woord,
+ * zodat bijv. "www" of "software" niet aanslaat; langere woorden
+ * ("wachtwoord", "password") ook als deel van een woord
+ * ("ftpwachtwoorden", "mypasswords").
+ */
+function isMogelijkInloggegevensBestand($bestandsnaam)
+{
+    $naam = strtolower((string) $bestandsnaam);
+
+    // Alleen bestandstypen waar gegevens in staan (tekst, documenten,
+    // spreadsheets, archieven, wachtwoordkluizen) of zonder extensie - een
+    // webpagina als "inloggen.html" bevat geen inloggegevens.
+    if (preg_match('/\.([a-z0-9]{1,5})$/', $naam, $ext)
+        && !in_array($ext[1], ['txt', 'text', 'md', 'csv', 'tsv', 'log', 'doc', 'docx', 'odt', 'rtf', 'pdf',
+            'xls', 'xlsx', 'ods', 'json', 'ini', 'conf', 'cfg', 'bak', 'old', 'zip', 'rar', '7z', 'kdbx'], true)) {
+        return false;
+    }
+    $naam = preg_replace('/\.[a-z0-9]{1,5}$/', '', $naam);
+
+    if (preg_match('/wachtwoord|password|passwort|passwd|credential|inlog|login/', $naam)) {
+        return true;
+    }
+
+    $losseWoorden = ['ww', 'pw', 'pwd', 'pass', 'ftp', 'sftp', 'ssh', 'logins', 'accounts', 'secret', 'secrets', 'wachtw'];
+    $woorden = preg_split('/[^a-z0-9]+/', $naam, -1, PREG_SPLIT_NO_EMPTY);
+    foreach ($woorden as $woord) {
+        if (in_array($woord, $losseWoorden, true)) {
+            return true;
+        }
+        // "ftp" aan het begin of eind van een woord ("ftpdingen",
+        // "ftpgegevens", "mijnftp"), niet ergens middenin ("giftpakket").
+        if (preg_match('/^s?ftp|ftp$/', $woord)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Lijkt de INHOUD van een klein tekstbestand op een lijst met
+ * inloggegevens? Los van de bestandsnaam, want die kan van alles zijn
+ * ("ftpdingen.txt", "notities.txt", "bianca.txt"). Twee signalen:
+ *
+ * 1. Een label met een dubbele punt of isgelijkteken ervoor, zoals
+ *    "wachtwoord:", "ww =", "password:", "gebruikersnaam:", "ftp:".
+ * 2. Een gebruikersnaam of e-mailadres op een regel, direct gevolgd door
+ *    een regel met alleen een wachtwoordachtige reeks (geen spaties, 8+
+ *    tekens, minstens drie van: kleine letters, hoofdletters, cijfers,
+ *    leestekens). Ook op één regel gescheiden door spatie, tab, ; of |.
+ *
+ * Alleen tekstachtige bestanden tot 256 KB; er worden maximaal 64 KB
+ * gelezen. De gevonden gegevens zelf worden nergens meegestuurd.
+ */
+function lijktOpInloggegevensInhoud($volledigPad, $bestandsnaam)
+{
+    $naam = strtolower((string) $bestandsnaam);
+    if (preg_match('/\.([a-z0-9]{1,5})$/', $naam, $ext)
+        && !in_array($ext[1], ['txt', 'text', 'md', 'csv', 'tsv', 'log', 'ini', 'conf', 'cfg', 'json', 'bak', 'old'], true)) {
+        return false;
+    }
+
+    $grootte = @filesize($volledigPad);
+    if ($grootte === false || $grootte === 0 || $grootte > 262144) {
+        return false;
+    }
+
+    $inhoud = @file_get_contents($volledigPad, false, null, 0, 65536);
+    if ($inhoud === false || $inhoud === '' || strpos($inhoud, "\0") !== false) {
+        return false;
+    }
+
+    // Signaal 1: gelabelde inloggegevens.
+    if (preg_match('/(^|[\s,;|])(wachtwoord|password|passwd|passwort|pwd|pw|ww|pass|gebruikersnaam|gebruiker|username|user|login|inlog|ftp|sftp|ssh)\s*[:=]\s*\S/im', $inhoud)) {
+        return true;
+    }
+
+    // Signaal 2: gebruiker/e-mail + wachtwoordachtige reeks.
+    $isWachtwoordachtig = function ($tekst) {
+        $tekst = trim($tekst);
+        if ($tekst === '' || strlen($tekst) < 8 || strlen($tekst) > 128 || preg_match('/\s/', $tekst)) {
+            return false;
+        }
+        if (preg_match('#^(https?://|www\.)#i', $tekst) || strpos($tekst, '@') !== false) {
+            return false;
+        }
+        $klassen = (int) preg_match('/[a-z]/', $tekst) + (int) preg_match('/[A-Z]/', $tekst)
+            + (int) preg_match('/[0-9]/', $tekst) + (int) preg_match('/[^A-Za-z0-9]/', $tekst);
+        return $klassen >= 3;
+    };
+    $isGebruikerachtig = function ($tekst) {
+        $tekst = trim($tekst);
+        return (bool) preg_match('/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i', $tekst)
+            || (bool) preg_match('/^[a-z][a-z0-9._-]{2,40}$/i', $tekst);
+    };
+
+    // Een paar met een e-mailadres telt meteen; met een gewone naam pas
+    // vanaf twee paren (anders slaat een boodschappenlijstje met
+    // "melk" gevolgd door "Kaas2024Plakjes" al aan).
+    $isEmail = function ($tekst) {
+        return (bool) preg_match('/@/', $tekst);
+    };
+    $paren = 0;
+    $regels = preg_split('/\r\n|\r|\n/', $inhoud);
+    $aantalRegels = count($regels);
+    for ($i = 0; $i < $aantalRegels; $i++) {
+        $regel = trim($regels[$i]);
+        if ($regel === '') {
+            continue;
+        }
+        $gebruiker = null;
+        // Op één regel: gebruiker + scheidingsteken + wachtwoord.
+        $delen = preg_split('/\s*[\t;|]\s*|\s+/', $regel, -1, PREG_SPLIT_NO_EMPTY);
+        if (count($delen) === 2 && $isGebruikerachtig($delen[0]) && $isWachtwoordachtig($delen[1])) {
+            $gebruiker = $delen[0];
+        } elseif ($isGebruikerachtig($regel) && isset($regels[$i + 1]) && $isWachtwoordachtig($regels[$i + 1])) {
+            // Op twee opeenvolgende regels.
+            $gebruiker = $regel;
+            $i++;
+        }
+        if ($gebruiker !== null) {
+            if ($isEmail($gebruiker) || ++$paren >= 2) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 // ----------------------------------------------------------------------
@@ -4717,6 +4863,33 @@ function checkRootLevel($pad, &$rootUnknown, $vertrouwdeMappen, $ignoreerBestand
                 }
 
                 $isUitvoerbaar = (bool) preg_match('/\.(php\d?|phtml|phar|cgi|pl|sh)$/i', $item);
+
+                // Niet-uitvoerbaar bestand waarvan de naam op inloggegevens
+                // wijst (bijv. "ftp gegevens en ww.txt"): in de website-root
+                // is zo'n bestand voor iedereen te downloaden die de naam
+                // raadt. Bewust vóór het eigen uitsluitpatroon, zodat een
+                // breed patroon (bijv. *.txt) dit niet ongemerkt verbergt.
+                $inloggegevensSignaal = null;
+                if (!$isUitvoerbaar && !is_link($volledigPad)) {
+                    if (lijktOpInloggegevensInhoud($volledigPad, $item)) {
+                        $inloggegevensSignaal = 'INHOUD LIJKT OP INLOGGEGEVENS';
+                    } elseif (isMogelijkInloggegevensBestand($item)) {
+                        $inloggegevensSignaal = 'BESTANDSNAAM WIJST OP INLOGGEGEVENS';
+                    }
+                }
+                if ($inloggegevensSignaal !== null) {
+                    $rootUnknown[] = [
+                        'type' => 'bestand',
+                        'naam' => $naamPrefix . $item,
+                        'pad' => $volledigPad,
+                        'risico' => $inloggegevensSignaal === 'INHOUD LIJKT OP INLOGGEGEVENS' ? 85 : 80,
+                        'gewijzigd' => date('Y-m-d H:i', filemtime($volledigPad)),
+                        'grootte' => filesize($volledigPad),
+                        'reden_override' => $inloggegevensSignaal . ' - staat in de website-root en is dus publiek te downloaden. Inhoud controleren, verwijderen (of buiten de website-root bewaren) en bij twijfel de betreffende wachtwoorden wijzigen.',
+                    ];
+                    continue;
+                }
+
                 // Eigen uitsluitpatroon uit de site-instellingen - nooit voor een uitvoerbaar bestand.
                 if (!$isUitvoerbaar && matchtEigenRootPatroon($naamPrefix . $item)) {
                     continue;
@@ -6744,15 +6917,35 @@ echo "=== MONITOR ===\n";
  *   beantwoorden dat nooit, met een time-out of afgebroken verbinding tot gevolg.
  * - HTTP/1.1 expliciet: het scanresultaat is een enkele, grote POST - HTTP/2 heeft
  *   daar geen voordeel en is bij oude libcurl-versies een extra bron van problemen.
+ * - Gecodeerd verstuurd (gzip + base64, als application/octet-stream) in plaats
+ *   van als leesbare JSON: een webapplicatie-firewall (ModSecurity) op de
+ *   monitorserver ontleedt een application/json-body en weigert die bij meer dan
+ *   1000 JSON-sleutels ("JSON parsing error: More than 1000 JSON keys") - bij een
+ *   grote site met veel extensies of vondsten gebeurt dat al snel. Daarnaast
+ *   bevat het resultaat backdoor-omschrijvingen (eval, base64_decode, ...) die
+ *   een firewall in leesbare vorm voor een aanval aanziet. De monitor herkent
+ *   het formaat aan de header X-Monitor-Codering en accepteert ook nog gewone
+ *   JSON van oudere scanscripts.
  */
 function stuurScanresultaatNaarMonitor(string $json, int $maxSeconden): array
 {
+    $codering = 'base64';
+    $lichaam = $json;
+    if (function_exists('gzencode')) {
+        $gecomprimeerd = @gzencode($json, 6);
+        if ($gecomprimeerd !== false) {
+            $lichaam = $gecomprimeerd;
+            $codering = 'gzip+base64';
+        }
+    }
+    $lichaam = base64_encode($lichaam);
+
     $ch = curl_init('__MONITOR_BASIS_URL__/ontvang_scan.php');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $json,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Expect:'],
+        CURLOPT_POSTFIELDS => $lichaam,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream', 'X-Monitor-Codering: ' . $codering, 'Expect:'],
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         CURLOPT_CONNECTTIMEOUT => 15,
         CURLOPT_TIMEOUT => $maxSeconden,

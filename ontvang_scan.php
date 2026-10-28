@@ -29,6 +29,25 @@ require_once 'verdacht_functies.php'; // voor bepaalRisico() als terugval
 $geheimeCode = ontsleutelWaarde(haalInstelling($pdo, 'geheime_code', ''));
 
 $inhoud = file_get_contents('php://input');
+
+// Sinds 1.38 stuurt het scanscript het resultaat gecodeerd (gzip + base64, als
+// application/octet-stream), zodat een webapplicatie-firewall op deze server
+// het niet als JSON gaat ontleden (ModSecurity weigert meer dan 1000 JSON-
+// sleutels) of op leesbare backdoor-omschrijvingen blokkeert. Oudere
+// scanscripts sturen nog gewone JSON; die blijft gewoon werken.
+$codering = strtolower(trim((string) ($_SERVER['HTTP_X_MONITOR_CODERING'] ?? '')));
+if ($codering === 'base64' || $codering === 'gzip+base64') {
+    $gedecodeerd = base64_decode((string) $inhoud, true);
+    if ($gedecodeerd !== false && $codering === 'gzip+base64') {
+        $gedecodeerd = function_exists('gzdecode') ? @gzdecode($gedecodeerd) : false;
+    }
+    if ($gedecodeerd === false) {
+        http_response_code(400);
+        die('Scanresultaat kon niet worden gedecodeerd (' . $codering . ').');
+    }
+    $inhoud = $gedecodeerd;
+}
+
 $data = json_decode($inhoud, true);
 
 if (!$data || ($data['geheime_code'] ?? '') !== $geheimeCode) {
@@ -668,4 +687,4 @@ if ($siteId) {
     }
 
     $pdo->commit();
-}
+}

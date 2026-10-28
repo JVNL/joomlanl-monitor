@@ -1,5 +1,43 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.38 - 2026-10-28
+
+### Bestanden met inloggegevens in de website-root (`scan_template.php`)
+Een tekstbestand in de website-root met FTP-gegevens en wachtwoorden werd als gewoon onbekend root-level item gemeld (LAAG · 35), terwijl iedereen die de naam raadt het kan downloaden.
+
+- **Nieuw: `isMogelijkInloggegevensBestand()`.** Een niet-uitvoerbaar bestand waarvan de naam op inloggegevens wijst (bijv. "wachtwoord", "password", "inlog", of los "ww", "pw", "ftp") wordt nu gemeld als "BESTANDSNAAM WIJST OP INLOGGEGEVENS" met HOOG · 80.
+- Alleen bestandstypen waar gegevens in staan (tekst, documenten, spreadsheets, archieven, wachtwoordkluizen) of zonder extensie. Een webpagina als `inloggen.html` telt niet mee.
+- Korte afkortingen tellen alleen als los woord, zodat bijvoorbeeld `www` of `software` niet aanslaat. Alleen "ftp" telt ook aan het begin of eind van een woord (bijv. `ftpdingen.txt`), niet ergens middenin.
+- **Nieuw: `lijktOpInloggegevensInhoud()`.** Ook de inhoud van kleine tekstbestanden (tot 256 KB) wordt gecontroleerd, los van de naam. Signalen: een label als `wachtwoord:`, `ww =` of `gebruikersnaam:`, of een e-mailadres gevolgd door een wachtwoordachtige reeks (op dezelfde of de volgende regel). Met een gewone gebruikersnaam in plaats van een e-mailadres telt het pas vanaf twee paren. Melding: "INHOUD LIJKT OP INLOGGEGEVENS" met HOOG · 85. De gevonden gegevens zelf worden niet meegestuurd.
+- De controle gaat vóór het eigen uitsluitpatroon, zodat een breed patroon (bijv. `*.txt`) zo'n bestand niet ongemerkt verbergt.
+
+### Scanresultaat geweigerd door de firewall van de monitorserver (`scan_template.php`, `ontvang_scan.php`)
+Bij een site met veel extensies of vondsten kwam het scanresultaat niet aan: ModSecurity op de monitorserver weigerde de POST naar `ontvang_scan.php` met "JSON parsing error: More than 1000 JSON keys".
+
+- Het scanscript stuurt het resultaat nu gecomprimeerd en gecodeerd (gzip + base64, als `application/octet-stream`, met de header `X-Monitor-Codering`). De firewall ontleedt het dan niet meer als JSON, en ziet ook geen leesbare backdoor-omschrijvingen meer die op een aanval lijken. Het resultaat is daardoor ook een stuk kleiner.
+- De monitor accepteert ook nog gewone JSON van scanscripts die zichzelf nog niet hebben bijgewerkt.
+
+### FileZilla-koppeling ook voor FTP met TLS (`filezilla-als-standaard.reg`, `help.php`)
+Bij een site met "FTP over TLS" maakt de monitor een `ftpes://`-link (die FileZilla als FTP met TLS herkent), maar het registerbestand koppelde alleen `ftp://` en `sftp://` aan FileZilla. Het FTP-icoontje deed bij zulke sites dus niets. `ftpes://` is toegevoegd; wie het bestand al eerder uitvoerde, voert de nieuwe versie nog een keer uit.
+
+### Helppagina als uitklapbare hoofdstukken (`help.php`)
+- De inhoudsopgave met links bovenaan is vervangen door uitklapbare hoofdstukken (accordion), met knoppen "Alles openklappen" en "Alles dichtklappen".
+- Een link naar een onderdeel (bijv. `help.php#admin-tools`, of de "?"-icoontjes elders in de monitor) klapt het juiste hoofdstuk automatisch open en scrolt ernaartoe, ook als het anker een kopje binnen een hoofdstuk is.
+- Het Admin Tools-stappenplan is een compacte genummerde lijst in plaats van losse blokken.
+
+### Vingerafdruk van het scanscript hernoemd (`scan_template.php`)
+De vingerafdruk waarmee scanscripts elkaar herkennen heet nu `JOOMLANL_MONITOR_SCANSCRIPT_`.
+
+- De oude naam wordt tijdelijk nog herkend en staat ook nog in het scanscript, zodat oude en nieuwe scanscripts elkaar herkennen zolang nog niet elke site is bijgewerkt. De oude naam kan weg zodra alle scanscripts zichzelf hebben bijgewerkt.
+- Beide vingerafdrukken staan nu bovenaan het bestand, ruim binnen het deel dat de root-level-controle leest.
+
+### Monitornaam en scanscriptnaam in plaats van een vaste naam (`site_toevoegen.php`, `site_instellingen.php`, `hosting_functies.php`, `help.php`, `configuratie.php`, `extensies.php`, `extensie_beheer.php`)
+- Het voorbeeld bij "Scanscript-bestandsnaam" bij het toevoegen van een site toont nu de echte naam die deze monitor genereert. De uitleg noemde ook ten onrechte de domeinnaam als basis; dat is de naam van de monitor.
+- De User-Agent bij het ophalen van hostinginformatie noemt geen andere monitornaam meer.
+- **De scanscript-bestandsnaam wordt al bij het openen van "Site toevoegen" gegenereerd** en staat letterlijk in de Admin Tools-instructies. Zo kun je de uitzondering in Admin Tools instellen vóórdat je de site toevoegt, zoals de instructie zegt. Bij het opslaan wordt die naam vastgelegd; een naam die niet het formaat van deze monitor heeft, wordt genegeerd en vervangen door een nieuwe.
+- **Stappenplan voor Akeeba Admin Tools nu ook op de helppagina** (hoofdstuk 3, met een eigen anker), zodat het later terug te vinden is als een scan geblokkeerd wordt. Inclusief wat te doen na het vervangen van de scanscript-naam en hoe je controleert of het werkt. "Site toevoegen" en Site-instellingen linken ernaar, en bij Veelvoorkomende problemen staat een nieuw punt over een 403 op het scanscript.
+- Uitleg- en helpteksten noemen niet meer de oude vaste naam `scan-en-check-website.php`, maar "het scanscript" (met verwijzing naar Site-instellingen waar dat nodig is).
+
 ## 1.37 - 2026-10-24
 
 ### Scans op hetzelfde hostingaccount na elkaar (`scan_template.php`, `help.php`)

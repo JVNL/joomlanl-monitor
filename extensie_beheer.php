@@ -680,7 +680,7 @@ input[type="url"] {
 
         <label for="manifest_pad">Manifest-pad <span style="font-weight: normal;">(optioneel)</span></label>
         <div class="uitleg">
-            Alleen nodig als je wil dat het systeem deze extensie ook via een manifest-bestand probeert te detecteren (naast de automatische detectie via <code>scan-en-check-website.php</code>). Pad relatief aan de <code>administrator</code>-map, meestal één van deze twee vormen:<br>
+            Alleen nodig als je wil dat het systeem deze extensie ook via een manifest-bestand probeert te detecteren (naast de automatische detectie via het scanscript). Pad relatief aan de <code>administrator</code>-map, meestal één van deze twee vormen:<br>
             &bull; <code>manifests/packages/pkg_&lt;naam&gt;.xml</code> (bij een package-extensie)<br>
             &bull; <code>components/com_&lt;naam&gt;/&lt;naam&gt;.xml</code> (bij een los component)<br>
             Laat dit leeg als je alleen een update-feed-URL wil koppelen aan een al automatisch gedetecteerde extensie.

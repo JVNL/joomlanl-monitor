@@ -21,3 +21,14 @@ Windows Registry Editor Version 5.00
 
 [HKEY_CLASSES_ROOT\sftp\shell\open\command]
 @="\"C:\\Program Files\\FileZilla FTP Client\\filezilla.exe\" \"%1\""
+
+[HKEY_CLASSES_ROOT\ftpes]
+@="URL:FTPES Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\ftpes\shell]
+
+[HKEY_CLASSES_ROOT\ftpes\shell\open]
+
+[HKEY_CLASSES_ROOT\ftpes\shell\open\command]
+@="\"C:\\Program Files\\FileZilla FTP Client\\filezilla.exe\" \"%1\""

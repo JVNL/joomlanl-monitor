@@ -358,7 +358,7 @@ function zoekNetwerkEigenaar(string $ip): array
         CURLOPT_MAXREDIRS      => 3,
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_TIMEOUT        => 8,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; CompactWebMonitor/1.0; +https://compactweb.nl)',
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; JoomlaNLMonitor/1.0)',
     ]);
     $antwoord = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -424,7 +424,7 @@ function zoekIpToewijzing(string $ip): array
         CURLOPT_MAXREDIRS      => 3,
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_TIMEOUT        => 8,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; CompactWebMonitor/1.0; +https://compactweb.nl)',
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; JoomlaNLMonitor/1.0)',
     ]);
     $antwoord = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

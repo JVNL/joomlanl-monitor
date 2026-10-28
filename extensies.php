@@ -510,7 +510,7 @@ if (!empty($centraalOverzicht)) {
 <?php if (empty($derdePartijLijst)): ?>
 <tr>
     <td colspan="8">
-        Nog geen gegevens. Draai <code>scan-en-check-website.php</code> op deze site (via de knop "Scan en check sites" op de monitorpagina)
+        Nog geen gegevens. Draai het scanscript op deze site (via de knop "Scan en check sites" op de monitorpagina)
         om de volledige extensielijst op te halen.
     </td>
 </tr>

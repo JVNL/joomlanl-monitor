@@ -64,52 +64,75 @@ h1 {
     margin-bottom: 20px;
 }
 
-.inhoudsopgave {
-    padding: 15px 20px;
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    margin-bottom: 25px;
+.hoofdstuk-knoppen {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-bottom: 10px;
 }
-
-.inhoudsopgave h2 {
-    font-size: 16px;
-    margin: 0 0 10px 0;
-}
-
-.inhoudsopgave ol {
-    margin: 0;
-    padding-left: 20px;
-}
-
-.inhoudsopgave a {
+.knop.knop-licht {
+    background: transparent;
     color: var(--thema-link);
-    text-decoration: none;
+    border: 1px solid var(--thema-rand);
+    padding: 5px 10px;
+    font-size: 13px;
+    cursor: pointer;
 }
-
-.inhoudsopgave a:hover {
-    text-decoration: underline;
+.knop.knop-licht:hover {
+    background: var(--thema-zebra);
 }
-
-section {
-    margin-bottom: 35px;
-    padding-bottom: 25px;
-    border-bottom: 1px solid #e5e5e5;
+details.hoofdstuk {
+    border: 1px solid var(--thema-rand);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    overflow: hidden;
 }
-
-section:last-of-type {
-    border-bottom: none;
+details.hoofdstuk > summary {
+    list-style: none;
+    cursor: pointer;
+    /* Vast blauw (gelijk aan de kopkleur in donkere weergave), ook in lichte
+       weergave - daar is de algemene kopkleur zwart. */
+    background: #2c5f8a;
+    color: #fff;
+    padding: 10px 14px 10px 36px;
+    position: relative;
+    user-select: none;
 }
-
-h2 {
-    font-size: 19px;
-    background: var(--thema-kop-bg);
-    color: var(--thema-kop-tekst);
-    padding: 8px 12px;
-    border-radius: 4px;
-    margin-bottom: 15px;
+details.hoofdstuk > summary::-webkit-details-marker {
+    display: none;
 }
-
+details.hoofdstuk > summary::before {
+    content: "\25B8";
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: transform 0.15s;
+}
+details.hoofdstuk[open] > summary::before {
+    transform: translateY(-50%) rotate(90deg);
+}
+details.hoofdstuk > summary:hover {
+    filter: brightness(1.1);
+}
+details.hoofdstuk > summary h2 {
+    display: inline;
+    font-size: 17px;
+    margin: 0;
+    padding: 0;
+    background: none;
+    color: inherit;
+}
+.hoofdstuk-inhoud {
+    padding: 4px 18px 16px 18px;
+}
+ol.stappenlijst {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+ol.stappenlijst li {
+    margin-bottom: 3px;
+}
 h3 {
     font-size: 16px;
     margin: 18px 0 6px 0;
@@ -211,28 +234,14 @@ th {
 
 <div class="help-inhoud">
 
-<div class="inhoudsopgave">
-    <h2>Inhoud</h2>
-    <ol>
-        <li><a href="#configuratie">De configuratiepagina invullen</a></li>
-        <li><a href="#uploaden">Het scanscript naar elke site krijgen (handmatig of via FTP/SFTP)</a></li>
-        <li><a href="#sites-toevoegen">Sites toevoegen</a></li>
-        <li><a href="#site-instellingen">Site-instellingen: extra scanpad, FTP/SFTP &amp; site verwijderen</a></li>
-        <li><a href="#een-site-herscannen">Eén site snel opnieuw scannen</a></li>
-        <li><a href="#handmatige-scan">Een handmatige scan starten (alle sites)</a></li>
-        <li><a href="#cronjob">Automatiseren met een cronjob</a></li>
-        <li><a href="#email">E-mailmeldingen instellen</a></li>
-        <li><a href="#beveiliging">Het beveiligingsrapport gebruiken</a></li>
-        <li><a href="#extensies">Het extensieoverzicht en de extensietabel gebruiken</a></li>
-        <li><a href="#statussen">Wat betekenen de kleuren/statussen?</a></li>
-        <li><a href="#backups-installatie">Back-ups, installatie- en updatepakketten</a></li>
-        <li><a href="#hostingoverzicht">Het hostingoverzicht: hostingpartij, server en IP-adres</a></li>
-        <li><a href="#problemen">Veelvoorkomende problemen</a></li>
-    </ol>
+<div class="hoofdstuk-knoppen">
+    <button type="button" class="knop knop-licht" onclick="zetAlleHoofdstukken(true)">Alles openklappen</button>
+    <button type="button" class="knop knop-licht" onclick="zetAlleHoofdstukken(false)">Alles dichtklappen</button>
 </div>
 
-<section id="configuratie">
-    <h2>1. De configuratiepagina invullen</h2>
+<details class="hoofdstuk" id="configuratie">
+    <summary><h2>1. De configuratiepagina invullen</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Ga naar het ⚙️-tandwiel bovenin de monitorpagina. Daar staan twee tabbladen: <strong>Algemeen</strong> en <strong>Site toevoegen</strong>.</p>
 
     <h3>Blok "E-mailinstellingen"</h3>
@@ -300,10 +309,12 @@ th {
         nooit (succesvol) gescand, dan staat 'ie hier ook nog niet tussen, ook al gebruikt die zo'n firewall-extensie wel
         degelijk.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="uploaden">
-    <h2>2. Het scanscript naar elke site krijgen (handmatig of via FTP/SFTP)</h2>
+<details class="hoofdstuk" id="uploaden">
+    <summary><h2>2. Het scanscript naar elke site krijgen (handmatig of via FTP/SFTP)</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Er zijn twee manieren: helemaal handmatig downloaden/uploaden, of automatisch laten versturen als je de FTP-/SFTP-gegevens van een site hebt ingevuld (zie hoofdstuk 4).</p>
 
     <h3>Handmatig</h3>
@@ -338,10 +349,12 @@ th {
         dan moet je de uitzondering in de firewall <strong>opnieuw</strong> instellen met de nieuwe naam - anders
         blokkeert de firewall het scanscript alsnog, ook al staat het gewoon correct op de site.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="sites-toevoegen">
-    <h2>3. Sites toevoegen</h2>
+<details class="hoofdstuk" id="sites-toevoegen">
+    <summary><h2>3. Sites toevoegen</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Ga naar ⚙️ Configuratie → tabblad "Site toevoegen". Daar vul je twee velden in:</p>
 
     <h3>Domein</h3>
@@ -394,16 +407,39 @@ th {
     scan, het handmatig openen van het scanscript, quarantaine/blokkeer/verwijder-acties, de website-/SSL-status,
     en de Joomla-versiedetectie via het Admin-pad.</p>
 
+    <h3 id="admin-tools">Akeeba Admin Tools (of een vergelijkbare firewall)</h3>
+    <p>Admin Tools blokkeert standaard zowel het IP-adres van de monitor (de scans lijken op verdacht verkeer) als het rechtstreeks aanroepen van losse PHP-bestanden, zoals het scanscript. Zonder de aanpassingen hieronder krijg je bij het scannen een 403, of komt de site na een paar scans als offline in de monitor te staan.</p>
+    <p>Bij "Site toevoegen" staat dit stappenplan ook (knop "Klik hier als je Akeeba Admin Tools gebruikt"), mét de bestandsnaam voor de nieuwe site al ingevuld. Doe het dan het liefst vóór het opslaan van de site. Voor een site die al in de monitor staat, vind je de bestandsnaam bij Site-instellingen onder "Scanscript-bestandsnaam".</p>
+    <ol class="stappenlijst">
+        <li>Zoek het IPv4- en IPv6-adres op van de monitorwebsite.</li>
+        <li>Ga in Admin Tools naar <strong>Web Application Firewall</strong> en open <strong>Configure WAF</strong>.</li>
+        <li>Open het tabblad <strong>Exceptions</strong>.</li>
+        <li>Maak met het groene plus-teken een nieuwe regel en zet daar het IP-adres in, met als omschrijving bijvoorbeeld <code>Website Monitor</code>. Doe dit voor het IPv4- én het IPv6-adres, als die bekend zijn.</li>
+        <li>Ga naar de Admin Tools <strong>.htaccess maker</strong> en scroll naar <strong>Server protection</strong>.</li>
+        <li><strong>Backend directories where file type exceptions are allowed</strong> - maak daar een nieuwe regel aan voor <code>administrator</code> en plaats daarachter <code>manifests</code>.</li>
+        <li>Daaronder staat <strong>Backend file types allowed in selected directories</strong> - type daar <code>xml</code> en druk op Enter.</li>
+        <li>Scroll naar <strong>Exceptions from Server Protection</strong> → <strong>Allow direct access to these files</strong>, maak een nieuwe regel aan en zet daarin de scanscript-bestandsnaam van deze site (bijv. <code>scan-door-mijnmonitor-a3f9c2.php</code>; de echte naam staat bij Site-instellingen).</li>
+        <li>Sla op met <strong>"Save and Create .htaccess"</strong> linksboven.</li>
+    </ol>
+    <div class="waarschuwing">
+        ⚠️ <strong>Vervang je de scanscript-naam later</strong> (knop "Vervang door nieuwe, unieke naam" bij Site-instellingen), dan moet je bij stap 8 de oude naam vervangen door de nieuwe en opnieuw opslaan (stap 9). Anders blokkeert Admin Tools het scanscript alsnog, ook al staat het correct op de site.
+    </div>
+    <div class="tip">
+        💡 <strong>Controleren of het werkt:</strong> open het scanscript via 📋 op de indexpagina. Krijg je een 403-pagina van Admin Tools in plaats van scanuitvoer, controleer dan stap 8 (exacte bestandsnaam, ook na een naamswijziging) en stap 4 (IP-adres van de monitor). Kijk bij twijfel in Admin Tools onder <strong>Web Application Firewall → Blocked Requests Log</strong> waarom het verzoek is geblokkeerd.
+    </div>
+
     <h3>Slimme opslaanknop</h3>
-    <p>Vul je ook meteen de FTP-/SFTP-gegevens in (inclusief een gevonden of handmatig ingevuld pad, niet de kale standaard <code>/</code>), dan verandert de knop onderaan vanzelf van <strong>"Opslaan"</strong> naar <strong>"Opslaan en FTP-bestand versturen"</strong>. In dat geval wordt <code>scan-en-check-website.php</code> na het opslaan direct automatisch naar de juiste locatie verstuurd - stap 2 hoeft dan niet meer apart.</p>
+    <p>Vul je ook meteen de FTP-/SFTP-gegevens in (inclusief een gevonden of handmatig ingevuld pad, niet de kale standaard <code>/</code>), dan verandert de knop onderaan vanzelf van <strong>"Opslaan"</strong> naar <strong>"Opslaan en FTP-bestand versturen"</strong>. In dat geval wordt het scanscript na het opslaan direct automatisch naar de juiste locatie verstuurd - stap 2 hoeft dan niet meer apart.</p>
 
     <div class="waarschuwing">
-        ⚠️ Vergeet na het toevoegen niet om <code>scan-en-check-website.php</code> ook daadwerkelijk via FTP op de nieuwe site te zetten (zie stap 2) - anders kunnen de beveiligings- en extensiescans niet draaien voor die site. (Tenzij je de slimme opslaanknop hierboven hebt gebruikt - dan is dit al automatisch gebeurd.)
+        ⚠️ Vergeet na het toevoegen niet om het scanscript (met de naam die bij Site-instellingen staat) ook daadwerkelijk via FTP op de nieuwe site te zetten (zie stap 2) - anders kunnen de beveiligings- en extensiescans niet draaien voor die site. (Tenzij je de slimme opslaanknop hierboven hebt gebruikt - dan is dit al automatisch gebeurd.)
     </div>
-</section>
+    </div>
+</details>
 
-<section id="site-instellingen">
-    <h2>4. Site-instellingen: extra scanpad, FTP/SFTP &amp; site verwijderen</h2>
+<details class="hoofdstuk" id="site-instellingen">
+    <summary><h2>4. Site-instellingen: extra scanpad, FTP/SFTP &amp; site verwijderen</h2></summary>
+    <div class="hoofdstuk-inhoud">
 
     <h3>FTP/SFTP-gegevens</h3>
     <p>Bovenaan Site-instellingen kun je kiezen tussen <strong>FTP</strong> (met optioneel "waarvan beveiligd" voor FTPS) en <strong>SFTP</strong> - dat laatste is een compleet ander protocol, gebaseerd op SSH, met meestal poort 22 in plaats van 21. Kies het protocol dat bij de gegevens van je hostingpartij past.</p>
@@ -523,10 +559,12 @@ th {
         💡 Dit alles is bewust een "beste poging": lukt het verwijderen op de site zelf niet, dan gaat de opruiming in
         de monitor-database gewoon door. Er wordt hier nooit iets stiekem overgeslagen zonder dat je dat te zien krijgt.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="een-site-herscannen">
-    <h2>5. Eén site snel opnieuw scannen</h2>
+<details class="hoofdstuk" id="een-site-herscannen">
+    <summary><h2>5. Eén site snel opnieuw scannen</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Wil je niet wachten op de volledige scancyclus van alle sites, maar gewoon één specifieke site meteen verversen? Klik op het gele ↻-icoontje - dat staat op drie plekken: vooraan de siterij op de monitorpagina, en bovenaan zowel het extensieoverzicht als het beveiligingsrapport van die site.</p>
     <p>Dit doorloopt dezelfde stappen als de grote "Scan en check sites"-knop (zie hoofdstuk 6), maar dan alleen voor die ene site. In het beveiligingsrapport wacht de monitor niet een vaste tijd, maar tot het scanresultaat van de site ook echt is aangekomen (maximaal 90 seconden) - een voortgangsbalk (0-100%) laat precies zien in welke stap de scan zich bevindt, en de pagina ververst zichzelf zodra het klaar is. Komt er binnen die tijd geen nieuw resultaat aan, dan verschijnt een oranje waarschuwing in plaats van een onterechte "opnieuw gescand"-melding. Vanaf de monitorpagina en het extensieoverzicht geldt nog de kortere, vaste wachttijd (10 in plaats van 20 seconden).</p>
     <div class="tip">
@@ -536,21 +574,25 @@ th {
         handmatig via FTP.
     </div>
     <p>Twee andere icoontjes in dezelfde actiekolom: <strong>"FTP"</strong> opent de site direct in je lokale FTP-client (bijv. FileZilla), met gebruikersnaam/wachtwoord al ingevuld - tenzij die een teken bevatten dat niet betrouwbaar in zo'n link kan (bijv. een "@"), in welk geval beide apart, kopieerbaar getoond worden en FileZilla bewust niet automatisch opent. <strong>"PDF"</strong> opent het klantrapport (zie hoofdstuk 9) - een niet-technische samenvatting om door te sturen naar de site-eigenaar.</p>
-</section>
+    </div>
+</details>
 
-<section id="handmatige-scan">
-    <h2>6. Een handmatige scan starten (alle sites)</h2>
+<details class="hoofdstuk" id="handmatige-scan">
+    <summary><h2>6. Een handmatige scan starten (alle sites)</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Ga naar de monitorpagina en druk op de knop <strong>"🛡️🔍 Scan en check sites"</strong>. Een voortgangsbalk (0-100%) en leesbare statusteksten laten zien wat er gebeurt. Dit doorloopt automatisch, na elkaar, vier stappen:</p>
-    <div class="stap">1. <strong>Scan starten op alle websites</strong> - <code>scan-en-check-website.php</code> wordt op elke site aangeroepen (backdoor-scan + extensie-inventarisatie), parallel voor alle sites tegelijk. Vlak voordat het eigenlijke scannen van een site begint, wordt bij die site automatisch eerst de eigen <code>tmp</code>-map geleegd - handig omdat deze map vaak juist de plek is waar kortstondige, verdachte bestanden terechtkomen. Dit gebeurt bij elke scan, ook bij "Één site snel opnieuw scannen" (hoofdstuk 5) en handmatige herscans; er is geen aparte knop meer voor nodig. Staan meerdere gemonitorde sites op hetzelfde hostingaccount, dan scant het scanscript ze na elkaar in plaats van tegelijk: een scan wacht tot maximaal 90 seconden op een andere scan op hetzelfde account (de ruwe scanuitvoer meldt hoe lang). Zo delen ze niet de snelheid van het account en lopen ze niet allebei tegen de maximale scantijd aan.</div>
+    <div class="stap">1. <strong>Scan starten op alle websites</strong> - het scanscript wordt op elke site aangeroepen (backdoor-scan + extensie-inventarisatie), parallel voor alle sites tegelijk. Vlak voordat het eigenlijke scannen van een site begint, wordt bij die site automatisch eerst de eigen <code>tmp</code>-map geleegd - handig omdat deze map vaak juist de plek is waar kortstondige, verdachte bestanden terechtkomen. Dit gebeurt bij elke scan, ook bij "Één site snel opnieuw scannen" (hoofdstuk 5) en handmatige herscans; er is geen aparte knop meer voor nodig. Staan meerdere gemonitorde sites op hetzelfde hostingaccount, dan scant het scanscript ze na elkaar in plaats van tegelijk: een scan wacht tot maximaal 90 seconden op een andere scan op hetzelfde account (de ruwe scanuitvoer meldt hoe lang). Zo delen ze niet de snelheid van het account en lopen ze niet allebei tegen de maximale scantijd aan.</div>
     <div class="stap">2. <strong>Even wachten</strong> (20 seconden, aftellend zichtbaar) - zodat de sites de tijd krijgen om de scan af te ronden en het resultaat terug te sturen.</div>
     <div class="stap">3. <strong>Website- en SSL-status controleren, Joomla-/extensieversies ophalen</strong> - inclusief "is dit de nieuwste versie?" en het favicon van elke site.</div>
     <div class="stap">4. <strong>Extensiebestanden tussen sites vergelijken</strong> - zie hoofdstuk 9.</div>
     <div class="stap">5. <strong>Notificatie-e-mail controleren</strong> - verstuurt (indien nodig, zie hoofdstuk 8) één samengevatte mail.</div>
     <p>Na afloop ververst de pagina automatisch en zie je de bijgewerkte gegevens in de tabel.</p>
-</section>
+    </div>
+</details>
 
-<section id="cronjob">
-    <h2>7. Automatiseren met een cronjob</h2>
+<details class="hoofdstuk" id="cronjob">
+    <summary><h2>7. Automatiseren met een cronjob</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Wil je niet elke keer handmatig op de knop drukken, dan kan dit via een cronjob (bijv. in DirectAdmin) volledig automatisch, bijvoorbeeld 1x per dag.</p>
     <p>Zet in de cronjob een verwijzing naar <code>cron_alles_scannen.php</code> (staat al klaar op <code><?php echo htmlspecialchars(__DIR__); ?>/</code>) - dit bestand doorloopt zelf dezelfde stappen als de knop hierboven (inclusief de wachttijd, en de vergelijking van extensiebestanden tussen sites, zie hoofdstuk 9), maar dan zonder dat er een browser nodig is.</p>
 
@@ -620,10 +662,12 @@ th {
         oplossing is om elke "%" te escapen met een backslash (dus <code>%</code> wordt <code>\%</code>) - maar
         met de tekenbeperking hierboven zou dit sinds kort al niet meer kunnen voorkomen.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="email">
-    <h2>8. E-mailmeldingen instellen</h2>
+<details class="hoofdstuk" id="email">
+    <summary><h2>8. E-mailmeldingen instellen</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Bij Configuratie → Algemeen → blok "E-mailinstellingen" bepaal je precies wat er in de notificatiemail komt. Er wordt alleen een mail verstuurd als er ook daadwerkelijk iets te melden is - géén mail betekent dus "alles in orde" volgens de aangevinkte categorieën.</p>
     <p>Bovenaan datzelfde blok staat het veld <strong>"Naam van de monitor / afzendernaam voor e-mail"</strong> - deze naam wordt gebruikt als afzendernaam in de mailclient van de ontvanger, als de titel van de monitor zelf (linksboven op de overzichtspagina, browsertabblad, enz.), én als leesbaar voorvoegsel in de bestandsnaam van nieuw aangemaakte scanscripts (bestaande scanscripts op je sites blijven ongewijzigd werken). Leeg laten geeft de standaardnaam "Mijn Websites Monitor".</p>
     <div class="tip">
@@ -651,10 +695,12 @@ th {
         💡 De mail is een HTML-mail: bij elke site met een melding zie je het favicon (linkt naar de website zelf) en
         de domeinnaam (linkt naar het beheergedeelte van die site) - net als op de monitorpagina zelf.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="beveiliging">
-    <h2>9. Het beveiligingsrapport gebruiken</h2>
+<details class="hoofdstuk" id="beveiliging">
+    <summary><h2>9. Het beveiligingsrapport gebruiken</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Klik in de kolom "Beveiliging" op de status van een site om het volledige rapport te zien: alle gevonden verdachte bestanden/mappen, met type, pad, wijzigingsdatum en reden.</p>
     <p>Weet je zeker dat een gevonden item legitiem is (bijv. een bekende extensie-map die toevallig als "onbekend" wordt gezien)? Klik dan op de knop <strong>"✅ Vertrouwen"</strong> achter dat item. Het verdwijnt dan meteen uit de standaardweergave en telt niet meer mee in de tellers en in de e-mailmelding. Wil je alles (ook vertrouwde items) alsnog zien, klik dan op "Toon ook de vertrouwde items". Het rapport opent altijd met de vertrouwde items verborgen, ook vanaf de link "✅ N vertrouwd" op de monitorpagina en na "Herscan alleen deze website".</p>
     <p>Komt precies dezelfde melding vijf keer of vaker voor (bijvoorbeeld honderden identieke <code>.htaccess</code>-bestanden na een besmetting), dan staan die bestanden onder één kopregel met het aantal. Klap de groep open met <strong>▶</strong> om de losse bestanden te zien; elk bestand houdt zijn eigen knoppen. Vink de kopregel aan om alle bestanden in de groep te selecteren en gebruik dan de knoppen in de balk bovenaan voor de hele groep tegelijk. Ook het klantrapport vat zo'n groep samen: het aantal, de melding en tien voorbeelden.</p>
@@ -803,10 +849,12 @@ th {
     <h3>Klantrapport (PDF)</h3>
     <p>Naast dit interactieve beveiligingsrapport (bedoeld als eigen werkscherm) staat er in de actiekolom en bovenaan het rapport zelf ook een knop <strong>"PDF"</strong>/"📄 Klantrapport openen" - dat opent een aparte, niet-technische pagina met alleen de samenvatting: gevonden bedreigingen, bestands-/maprechten, onbekende items, verouderde extensies, de Joomla-versie en de beheerdersaccounts (Super Users, met de vraag of de eigenaar ze allemaal herkent), zonder knoppen om iets te wijzigen. Geschikt om rechtstreeks door te sturen naar de eigenaar van de website, die daarmee zelf kan beoordelen of (en hoe) de site opgeschoond moet worden.</p>
     <p>Via de knop <strong>"🖨️ Opslaan als PDF / afdrukken"</strong> bovenaan die pagina open je het eigen printvoorbeeld van je browser - kies daar "Opslaan als PDF" als bestemming. Klik na het opslaan op <strong>"Annuleren"</strong> in dat printvoorbeeld om terug te keren naar de pagina zelf (niet op het kruisje van het browservenster, dat sluit de hele browser). Vertrouwde/al beoordeelde items staan hier bewust niet in - dat is al eerder als onschuldig beoordeeld en hoort niet in een rapport dat bedoeld is om iemand te laten opschonen.</p>
-</section>
+    </div>
+</details>
 
-<section id="extensies">
-    <h2>10. Het extensieoverzicht en de extensietabel gebruiken</h2>
+<details class="hoofdstuk" id="extensies">
+    <summary><h2>10. Het extensieoverzicht en de extensietabel gebruiken</h2></summary>
+    <div class="hoofdstuk-inhoud">
 
     <h3>Extensieoverzicht (per site)</h3>
     <p>Klik in de kolom "Extensies" op de status van een site voor het volledige overzicht: alle gedetecteerde extensies van derden, met geïnstalleerde versie, nieuwste versie en status.</p>
@@ -893,10 +941,12 @@ th {
     </ul>
     <p>Elke rij toont een badge die aangeeft hoe de huidige URL is opgeslagen: <span class="badge badge-groen">☁️ gedeeld via Github</span> of <span class="badge badge-oranje">💻 lokaal (niet op Github)</span>. Een bewust-lokale rij wordt gegarandeerd nooit meegenomen in een push naar Github (ook niet als die wordt getriggerd door het opslaan van een heel andere rij) en verschijnt ook nooit in de importmelding hierboven - je hoeft dus niet bang te zijn dat 'm per ongeluk weer wordt overschreven.</p>
     <p>Is er geen Github-token ingevuld bij Configuratie, dan zie je gewoon de simpele, originele "Opslaan"-knop - de keuze is dan toch niet relevant, want zonder token kan er sowieso niet naar Github geschreven worden.</p>
-</section>
+    </div>
+</details>
 
-<section id="statussen">
-    <h2>11. Wat betekenen de kleuren/statussen?</h2>
+<details class="hoofdstuk" id="statussen">
+    <summary><h2>11. Wat betekenen de kleuren/statussen?</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <table>
         <tr><th>Status</th><th>Betekenis</th></tr>
         <tr><td><span class="badge badge-groen">Online</span></td><td>Website reageert normaal (HTTP 200).</td></tr>
@@ -940,7 +990,7 @@ th {
         <tr><th style="width: 60px;">Icoon</th><th>Betekenis</th></tr>
         <tr><td>↻</td><td>Alleen deze ene site opnieuw scannen (zie hoofdstuk 5).</td></tr>
         <tr><td>⚙️</td><td>Naar Site-instellingen van deze site.</td></tr>
-        <tr><td>📋</td><td>Opent <code>scan-en-check-website.php</code> rechtstreeks in een nieuw tabblad - handig om snel de rauwe scanuitvoer van alleen deze site te zien, zonder naar Site-instellingen te hoeven.</td></tr>
+        <tr><td>📋</td><td>Opent het scanscript van deze site rechtstreeks in een nieuw tabblad - handig om snel de rauwe scanuitvoer van alleen deze site te zien, zonder naar Site-instellingen te hoeven.</td></tr>
         <tr><td><strong>FTP</strong></td><td>Alleen zichtbaar als er FTP-/SFTP-gegevens zijn ingevuld. Opent een <code>ftp://</code>-, <code>ftpes://</code>- (FTPS, als "waarvan beveiligd" is aangevinkt) of <code>sftp://</code>-link, zodat een lokaal geïnstalleerde FTP-client (bijv. FileZilla) - als je besturingssysteem dat protocol daaraan gekoppeld heeft - direct met de juiste site verbindt. Bevat de gebruikersnaam/het wachtwoord een teken dat een browser sowieso altijd codeert (zie de waarschuwing hieronder) of dat de linkstructuur zelf zou breken, dan verschijnt in plaats daarvan een 📋-variant: die kopieert het wachtwoord (en zo nodig ook de gebruikersnaam, in een apart kopieerbaar venstertje) naar het klembord en opent de link zonder die gegevens erin, zodat je ze alleen nog hoeft te plakken.</td></tr>
         <tr><td><strong>PDF</strong></td><td>Opent het klantrapport (zie hoofdstuk 9) - een niet-technische samenvatting om door te sturen naar de eigenaar van de website.</td></tr>
         <tr><td>🗑️</td><td>Site verwijderen (met bevestigingsvraag).</td></tr>
@@ -971,7 +1021,10 @@ th {
         koppelingstype"). Gebruik je de gewone, gratis FileZilla Client, dan doet die dit standaard niet.
         <br><br>
         Download hieronder een kant-en-klaar registerbestand dat dit voor je regelt - gewoon dubbelklikken en
-        bevestigen, geen handmatige registeraanpassing meer nodig:
+        bevestigen, geen handmatige registeraanpassing meer nodig. Het koppelt <code>ftp://</code>,
+        <code>ftpes://</code> (FTP met TLS, gebruikt bij sites met "FTP over TLS" aan) en <code>sftp://</code> aan FileZilla.
+        Had je een oudere versie al uitgevoerd en werkt het icoontje alleen niet bij sites met TLS? Voer dan deze
+        nieuwe versie nog een keer uit.
         <br><br>
         <a class="knop" href="filezilla-als-standaard.reg" download style="background: #1f6fa8;">⬇️ Download filezilla-als-standaard.reg</a>
         <br><br>
@@ -1028,11 +1081,13 @@ th {
         regelt protocolkoppelingen sowieso op een andere manier dan Windows. Verschijnt die vraag niet (meer), dan
         kan het ook altijd handmatig via Cyberduck → Voorkeuren → FTP en → SFTP.
     </div>
-</section>
+    </div>
+</details>
 
 
-<section id="backups-installatie">
-    <h2>12. Back-ups, installatie- en updatepakketten</h2>
+<details class="hoofdstuk" id="backups-installatie">
+    <summary><h2>12. Back-ups, installatie- en updatepakketten</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Onderaan de configuratiepagina staan drie groepen downloadknoppen:</p>
 
     <h3>Back-up maken</h3>
@@ -1054,10 +1109,12 @@ th {
         van elk pakket dat ermee gemaakt wordt. Bij een ontvanger ontbreken die bestanden dus vanzelf, en verdwijnt
         deze hele sectie automatisch mee - alleen jij kan dus nieuwe installatie-/updatepakketten maken.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="hostingoverzicht">
-    <h2>13. Het hostingoverzicht: hostingpartij, server en IP-adres</h2>
+<details class="hoofdstuk" id="hostingoverzicht">
+    <summary><h2>13. Het hostingoverzicht: hostingpartij, server en IP-adres</h2></summary>
+    <div class="hoofdstuk-inhoud">
     <p>Via de knop <strong>🖥️ Hostingoverzicht</strong> (rechts in de samenvattingsbalk op de monitorpagina) zie je per website
     <strong>waar</strong> die draait: bij welke hostingpartij, op welke server en op welk IP-adres. Handig om te zien welke sites
     samen op één server staan, of om te merken dat een site verhuisd is.</p>
@@ -1108,16 +1165,21 @@ th {
         💡 Klik op een kolomkop om te sorteren (bijv. op IP-adres, dan staan sites op dezelfde server onder elkaar).
         Met <strong>CSV downloaden</strong> krijg je alles als bestand dat direct in Excel opent.
     </div>
-</section>
+    </div>
+</details>
 
-<section id="problemen">
-    <h2>14. Veelvoorkomende problemen</h2>
+<details class="hoofdstuk" id="problemen">
+    <summary><h2>14. Veelvoorkomende problemen</h2></summary>
+    <div class="hoofdstuk-inhoud">
 
     <h3>Een site geeft plotseling 403 (offline) op alles</h3>
-    <p>Vaak een beveiligingsplugin die het IP-adres van de monitor tijdelijk blokkeert, omdat de scans er als verdacht verkeer uitzien. Zet het IP-adres van de monitor in de "Exceptions" van die plugin (zie het stappenplan bij "Site toevoegen").</p>
+    <p>Vaak een beveiligingsplugin die het IP-adres van de monitor tijdelijk blokkeert, omdat de scans er als verdacht verkeer uitzien. Zet het IP-adres van de monitor in de "Exceptions" van die plugin (zie <a href="#admin-tools">Akeeba Admin Tools</a> in hoofdstuk 3).</p>
+
+    <h3>Het scanscript geeft een 403 terwijl het wel op de site staat</h3>
+    <p>Gebruikt de site Akeeba Admin Tools of een vergelijkbare firewall? Dan staat de scanscript-bestandsnaam waarschijnlijk niet (of met de oude naam) bij de uitzonderingen. Zie <a href="#admin-tools">Akeeba Admin Tools</a> in hoofdstuk 3, stap 8.</p>
 
     <h3>Een beheeractie (Bekijk/Quarantaine/Blokkeer/Verwijder) geeft "HTTP 403"</h3>
-    <p>Bevat de foutmelding de tekst <strong>"Request forbidden by administrative rules"</strong>? Dan blokkeert <strong>mod_security</strong> - een firewall die de hostingpartij zelf op serverniveau instelt - dit specifieke verzoek al vóórdat het bij Joomla of het scanscript aankomt. Dit is geen instelling die vanuit de monitor is te omzeilen; neem contact op met de hostingpartij en vraag om een uitzondering voor POST-verzoeken naar <code>scan-en-check-website.php</code>. Gebruik tot die tijd gewoon FTP voor deze ene site.</p>
+    <p>Bevat de foutmelding de tekst <strong>"Request forbidden by administrative rules"</strong>? Dan blokkeert <strong>mod_security</strong> - een firewall die de hostingpartij zelf op serverniveau instelt - dit specifieke verzoek al vóórdat het bij Joomla of het scanscript aankomt. Dit is geen instelling die vanuit de monitor is te omzeilen; neem contact op met de hostingpartij en vraag om een uitzondering voor POST-verzoeken naar het scanscript van deze site (de naam staat bij Site-instellingen). Gebruik tot die tijd gewoon FTP voor deze ene site.</p>
     <p>Een andere HTTP-foutcode? De melding toont ook een fragment van de daadwerkelijk ontvangen inhoud - dat helpt vaak al om de oorzaak (een andere beveiligingsplugin, een verlopen sessie, een verouderd scanscript) te herkennen.</p>
 
     <h3>Een scan starten of een beheeractie geeft "Onverwacht antwoord (HTTP 301)"</h3>
@@ -1143,13 +1205,13 @@ th {
     <p>Blijft de melding na een paar scans staan? Ruim dan onnodige bestanden op (oude back-ups, testinstallaties), of sluit grote mappen buiten de website uit via de site-instellingen.</p>
 
     <h3>Extensieoverzicht blijft "Onbekend" tonen</h3>
-    <p>Controleer of <code>scan-en-check-website.php</code> wel op de site staat en of de laatste scan is gelukt. Kijk in de scanuitvoer (📋) bij "Details per extensie" en onder "=== MONITOR ===" of het ophalen van de feed mislukte, en of de monitor het daarna zelf wel lukte (zie "Feed geblokkeerd vanaf de site" in hoofdstuk 10 - bij een centraal opgehaalde feed staat er "CENTRAAL", en op het extensieoverzicht staat wanneer de monitor hem voor het laatst kon ophalen). Wordt de feed ook vanaf de monitor geblokkeerd, of kent Joomla zelf geen update-locatie voor de extensie, vul dan zelf een update-feed-URL in via "Extensietabel beheren".</p>
+    <p>Controleer of het scanscript wel op de site staat en of de laatste scan is gelukt. Kijk in de scanuitvoer (📋) bij "Details per extensie" en onder "=== MONITOR ===" of het ophalen van de feed mislukte, en of de monitor het daarna zelf wel lukte (zie "Feed geblokkeerd vanaf de site" in hoofdstuk 10 - bij een centraal opgehaalde feed staat er "CENTRAAL", en op het extensieoverzicht staat wanneer de monitor hem voor het laatst kon ophalen). Wordt de feed ook vanaf de monitor geblokkeerd, of kent Joomla zelf geen update-locatie voor de extensie, vul dan zelf een update-feed-URL in via "Extensietabel beheren".</p>
 
     <h3>Joomla-versie blijft leeg op de overzichtspagina</h3>
     <p>Dit is een ander mechanisme dan de extensies: de Joomla-kernversie wordt via het admin-pad opgehaald (zie hoofdstuk 3/4). Controleer bij Site-instellingen of het admin-pad correct is ingevuld.</p>
 
     <h3>Na het wijzigen van de geheime code werkt niets meer</h3>
-    <p>Download een nieuwe versie van <code>scan-en-check-website.php</code> via Configuratie (of via de site-specifieke download/verzendknop bij Site-instellingen) en zet die op <strong>elke</strong> site opnieuw - de oude bestanden op de sites kennen de nieuwe code nog niet.</p>
+    <p>Download een nieuwe versie van het scanscript via Configuratie (of via de site-specifieke download/verzendknop bij Site-instellingen) en zet die op <strong>elke</strong> site opnieuw - de oude bestanden op de sites kennen de nieuwe code nog niet.</p>
 
     <h3>De cronjob geeft een 403-fout ("Niet toegestaan")</h3>
     <p>Controleer of het commando in DirectAdmin de actuele <strong>cron-beveiligingscode</strong> meestuurt als <code>?cron_code=...</code> (URL-aanroep) of <code>--cron_code=...</code> (PHP-CLI). Is de code ooit gewijzigd op de configuratiepagina, werk dan ook het commando in de cronjob bij.</p>
@@ -1162,9 +1224,37 @@ th {
 
     <h3>De monitor werkt niet meer goed op mijn telefoon</h3>
     <p>Alle pagina's zijn responsive: tabellen worden op een smal scherm automatisch kaartjes in plaats van kolommen. Blijft een pagina er raar uitzien, controleer dan of <code>responsive_stijlen.php</code> nog gewoon op de server staat.</p>
-</section>
+    </div>
+</details>
 
 </div>
+
+<script>
+// Hoofdstukken als uitklapbare blokken (accordion). Een link naar een anker
+// (bijv. help.php#admin-tools, of een "?"-icoontje elders in de monitor)
+// klapt het hoofdstuk waar dat anker in staat automatisch open en scrolt
+// ernaartoe - ook als het anker een kopje binnen een hoofdstuk is.
+function zetAlleHoofdstukken(open) {
+    document.querySelectorAll('details.hoofdstuk').forEach(function (d) { d.open = open; });
+}
+function openAnker() {
+    var id = decodeURIComponent(location.hash.replace(/^#/, ''));
+    if (!id) {
+        return;
+    }
+    var doel = document.getElementById(id);
+    if (!doel) {
+        return;
+    }
+    var hoofdstuk = doel.closest('details.hoofdstuk');
+    if (hoofdstuk) {
+        hoofdstuk.open = true;
+    }
+    doel.scrollIntoView({ block: 'start' });
+}
+window.addEventListener('hashchange', openAnker);
+document.addEventListener('DOMContentLoaded', openAnker);
+</script>
 
 <?php include 'terug_naar_boven.php'; ?>
 </body>

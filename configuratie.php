@@ -619,7 +619,7 @@ header .knop {
     <strong>⚠️ Belangrijk: het scanscript moet opnieuw naar alle sites gestuurd worden.</strong>
     <div style="margin: 8px 0 12px 0;">
         Je hebt zojuist de geheime code, de cron-beveiligingscode of het monitor-pad gewijzigd. Deze waarden staan
-        verwerkt in <code>scan-en-check-website.php</code> op elke site - zolang dat niet is bijgewerkt, blijven de
+        verwerkt in het scanscript op elke site - zolang dat niet is bijgewerkt, blijven de
         oude scanscripts op de sites de <strong>oude</strong> waarden gebruiken, en werkt de koppeling niet meer.
     </div>
     <button type="button" class="knop" style="background: #6f42c1;" onclick="verstuurFtpAlleSites(this, 'ftp-resultaat-boven')">🚀 Verstuur nu automatisch naar alle sites met FTP-gegevens</button>
@@ -765,7 +765,7 @@ header .knop {
         <input type="text" id="notificatie_email" name="notificatie_email" required value="<?php echo htmlspecialchars($instellingen['notificatie_email'] ?? ''); ?>">
 
         <label for="geheime_code">Geheime code</label>
-        <div class="uitleg">Moet exact overeenkomen met de code in <code>scan-en-check-website.php</code> op elke site. Download hieronder een nieuwe versie na wijziging. Alleen letters, cijfers, streepjes en underscores, minimaal 20 tekens - deze code beveiligt ook het (zelf-)bijwerken van het scanscript, dus hoe willekeuriger/langer, hoe beter.</div>
+        <div class="uitleg">Moet exact overeenkomen met de code in het scanscript op elke site. Download hieronder een nieuwe versie na wijziging. Alleen letters, cijfers, streepjes en underscores, minimaal 20 tekens - deze code beveiligt ook het (zelf-)bijwerken van het scanscript, dus hoe willekeuriger/langer, hoe beter.</div>
         <input type="text" id="geheime_code" name="geheime_code" required pattern="[A-Za-z0-9_-]{20,}" title="Alleen letters, cijfers, streepjes en underscores, minimaal 20 tekens" value="<?php echo htmlspecialchars(ontsleutelWaarde($instellingen['geheime_code'] ?? '')); ?>">
 
         <label for="cron_geheime_code">Cron-beveiligingscode</label>

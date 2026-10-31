@@ -258,6 +258,338 @@ function isVermoedelijkExploitScannerRestant($bestandsnaam, $bestandsgrootte)
     return (bool) preg_match('/^[0-9a-f]{40}[a-zA-Z0-9]{0,12}$/', $bestandsnaam);
 }
 
+// ============================================================================
+// GSOCKET / UITVOERBARE BESTANDEN BUITEN DE WEBSITE / PERSISTENTIE IN HET ACCOUNT
+// ============================================================================
+//
+// Aanleiding (oktober 2026): op een gehackte site stond in de accountroot ~/.config/htop/defunct, een gsocket-
+// backdoor (een omgekeerde shell via het relaynetwerk van gsocket) met een vervalste datum uit 2019.
+// Het extra scanpad zag het bestand wel, maar meldde het alleen als "afwijkende rechten: 755" (LAAG · 25): het is geen
+// PHP, dus geen enkele inhoudscontrole keek ernaar. Zo'n backdoor draait als proces van het account en wordt via cron
+// of een opstartbestand van de shell (.bashrc/.profile) steeds opnieuw gestart - het blokkeren van PHP-uitvoering via
+// .htaccess helpt daar niet tegen.
+
+/**
+ * Tekstsignaturen van gsocket. Opgebouwd uit losse delen, zodat het scanscript zelf de letterlijke tekst niet bevat
+ * (anders meldt een tweede scanscript dat buiten de website staat, of een kopie ervan, zichzelf).
+ *
+ * @return string[]
+ */
+function gsocketSignaturen(): array
+{
+    return [
+        'GS' . '_ARGS',
+        'GSOCKET' . '_ARGS',
+        'gs-' . 'netcat',
+        'gs.' . 'thc.org',
+    ];
+}
+
+/**
+ * Zoekt de gsocket-signaturen in een bestand, ook in binaire bestanden. Leest in blokken van 1 MB (met overlap, zodat
+ * een signatuur op een bloksgrens niet wordt gemist), tot $maxBytes. Geeft de gevonden signatuur terug, of null.
+ */
+function vindGsocketSignatuur(string $pad, int $maxBytes = 16777216): ?string
+{
+    if (!@is_file($pad) || !@is_readable($pad)) {
+        return null;
+    }
+    $grootte = @filesize($pad);
+    if ($grootte === false || $grootte === 0 || $grootte > $maxBytes) {
+        return null;
+    }
+    $fh = @fopen($pad, 'rb');
+    if ($fh === false) {
+        return null;
+    }
+    $signaturen = gsocketSignaturen();
+    $overlap = 32;
+    $vorige = '';
+    $gevonden = null;
+    while (!feof($fh)) {
+        $blok = fread($fh, 1048576);
+        if ($blok === false || $blok === '') {
+            break;
+        }
+        $venster = $vorige . $blok;
+        foreach ($signaturen as $signatuur) {
+            if (stripos($venster, $signatuur) !== false) {
+                $gevonden = $signatuur;
+                break 2;
+            }
+        }
+        $vorige = substr($venster, -$overlap);
+    }
+    fclose($fh);
+    return $gevonden;
+}
+
+/**
+ * True als het bestand met de ELF-kop begint (Linux-programma of gedeelde bibliotheek).
+ */
+function isElfBestand(string $pad): bool
+{
+    $kop = @file_get_contents($pad, false, null, 0, 4);
+    return $kop === "\x7fELF";
+}
+
+/**
+ * Het statistiekenscript van DirectAdmin: domains/<domein>/awstats/awstats.pl, door de hostingpartij met rechten 755
+ * in het account gezet. Herkend als het:
+ *  1. precies op die plek staat en zo heet, en
+ *  2. byte voor byte gelijk is aan het origineel van de server (/usr/local/awstats/cgi-bin/awstats.pl), of - als dat
+ *     origineel niet leesbaar is (bv. door open_basedir) - begint met een Perl-regel en in de eerste 8 KB de kop van
+ *     AWStats heeft.
+ * Een ELF-programma onder die naam, of een ander bestand in die map, valt er niet onder. De controle op gsocket-
+ * signaturen blijft voor dit bestand gewoon gelden (zie scanRecursief()).
+ */
+function isAwstatsScriptVanHost(string $pad): bool
+{
+    if (!preg_match('#/domains/[^/]+/awstats/awstats\.pl$#', str_replace('\\', '/', $pad)) || !@is_readable($pad)) {
+        return false;
+    }
+    $origineel = '/usr/local/awstats/cgi-bin/awstats.pl';
+    if (@is_file($origineel) && @is_readable($origineel)) {
+        $eigen = @hash_file('sha256', $pad);
+        $herkend = is_string($eigen) && hash_equals((string) @hash_file('sha256', $origineel), $eigen);
+    } else {
+        $kop = (string) @file_get_contents($pad, false, null, 0, 8192);
+        $herkend = (bool) preg_match('#^\#![^\n]*perl#', $kop) && stripos($kop, 'AWStats') !== false && strpos($kop, "\x7fELF") !== 0;
+    }
+    if ($herkend) {
+        $GLOBALS['herkendeAwstatsScripts'][$pad] = true;
+    }
+    return $herkend;
+}
+
+/**
+ * Is dit een uitvoerbaar bestand (x-bit of ELF) BUITEN de website dat door het account zelf kan zijn neergezet? Dan
+ * hoort het als KRITIEK gemeld te worden. Niet: mappen, bestanden binnen de website, en bestanden van een andere
+ * eigenaar (bv. root) waarin het account niet kan schrijven - zoals de symlinks van CloudLinux in .cl.selector naar de
+ * PHP-programma's van de server. Een aanvaller die als dit account draait, kan zo'n bestand niet neerzetten.
+ * Herkend aan eigenaar + schrijfbaarheid, niet aan naam (zelfde regel als isNietDoorAccountBeschrijfbareMap()).
+ *
+ * @return string|null Omschrijving ("ELF-programma" / "uitvoerbaar (rechten 755)"), of null als het niet geldt.
+ */
+function uitvoerbaarBuitenWebsite(string $pad, string $startMap): ?string
+{
+    if (strpos($pad, rtrim($startMap, '/') . '/') === 0 || !@is_file($pad)) {
+        return null;
+    }
+    static $accountUid = null;
+    if ($accountUid === null) {
+        $accountUid = @fileowner($startMap);
+    }
+    $eigenaar = @fileowner($pad);
+    if ($accountUid !== false && $eigenaar !== false && $eigenaar !== $accountUid && !@is_writable($pad)) {
+        return null;
+    }
+    if (isAwstatsScriptVanHost($pad)) {
+        return null;
+    }
+    $rechten = @fileperms($pad);
+    $elf = @is_readable($pad) && isElfBestand($pad);
+    $xBit = $rechten !== false && ($rechten & 0111) !== 0;
+    if (!$elf && !$xBit) {
+        return null;
+    }
+    $rechtenTekst = $rechten !== false ? substr(sprintf('%o', $rechten), -3) : '?';
+    return $elf ? 'ELF-programma (Linux-binary, rechten ' . $rechtenTekst . ')' : 'uitvoerbaar bestand (rechten ' . $rechtenTekst . ')';
+}
+
+/**
+ * Meldt een uitvoerbaar bestand buiten de website als KRITIEK (zie uitvoerbaarBuitenWebsite()). Een gsocket-signatuur
+ * in hetzelfde bestand komt in dezelfde melding. Geeft true terug als er gemeld is, zodat de aanroeper geen tweede
+ * melding "afwijkende rechten" voor hetzelfde bestand maakt.
+ */
+function meldUitvoerbaarBuitenWebsite(string $pad, string $startMap, array &$backdoorVondsten): bool
+{
+    $soort = uitvoerbaarBuitenWebsite($pad, $startMap);
+    if ($soort === null) {
+        return false;
+    }
+    $signatuur = vindGsocketSignatuur($pad);
+    $reden = 'KRITIEK - ' . $soort . ' buiten de website, in het hostingaccount. Joomla en de hostingpartij zetten daar geen '
+        . 'programma\'s van het account neer; een backdoor in deze vorm (bv. gsocket, vaak in ~/.config/ met een '
+        . 'onschuldige naam en een vervalste datum) draait als proces van het account en wordt via cron of .bashrc/.profile '
+        . 'steeds opnieuw gestart. Controleer crontab en de opstartbestanden van de shell, laat de hostingpartij het proces '
+        . 'stoppen en verwijder het bestand';
+    if ($signatuur !== null) {
+        $reden .= ' || gsocket-signatuur "' . $signatuur . '" in het bestand - ZEKER BACKDOOR';
+    }
+    $backdoorVondsten[] = [
+        'naam' => $pad,
+        'reden' => $reden,
+        'risico' => $signatuur !== null ? 100 : 95,
+        'bestandspad' => $pad,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+        'grootte' => (int) @filesize($pad),
+    ];
+    return true;
+}
+
+/**
+ * Meldt een gsocket-signatuur in een (niet-uitvoerbaar, niet-PHP) bestand. Geeft true terug als er gemeld is.
+ */
+function meldGsocketSignatuur(string $pad, string $startMap, array &$backdoorVondsten): bool
+{
+    $signatuur = vindGsocketSignatuur($pad);
+    if ($signatuur === null) {
+        return false;
+    }
+    $binnen = strpos($pad, rtrim($startMap, '/') . '/') === 0;
+    $backdoorVondsten[] = [
+        'naam' => $binnen ? str_replace($startMap, '', $pad) : $pad,
+        'reden' => 'KRITIEK - gsocket-signatuur "' . $signatuur . '" (gsocket: omgekeerde shell via een relayserver) - ZEKER BACKDOOR. '
+            . 'Controleer crontab en .bashrc/.bash_profile/.profile op een regel die dit start, laat de hostingpartij het proces stoppen',
+        'risico' => 100,
+        'bestandspad' => $pad,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+        'grootte' => (int) @filesize($pad),
+    ];
+    return true;
+}
+
+/**
+ * Kenmerken van een gsocket-starter in crontab of een opstartbestand van de shell: de signaturen hierboven, plus
+ * "defunct" (de procesnaam waaronder gsocket zich verstopt) en "exec -a" (een proces onder een valse naam starten).
+ *
+ * @return string|null het eerste gevonden kenmerk
+ */
+function vindPersistentieKenmerk(string $regel): ?string
+{
+    foreach (array_merge(gsocketSignaturen(), ['defunct', 'exec' . ' -a']) as $kenmerk) {
+        if (stripos($regel, $kenmerk) !== false) {
+            return $kenmerk;
+        }
+    }
+    return null;
+}
+
+/**
+ * Crontab en de opstartbestanden van de shell (.bashrc, .bash_profile, .profile) van het account doorzoeken op een
+ * regel die een backdoor start (zie vindPersistentieKenmerk()). Elke gevonden regel wordt als KRITIEK gemeld.
+ * Draait los van het extra scanpad: de crontab is van het account, niet van een map. In de ruwe scanuitvoer staat wat
+ * er gelezen kon worden, en de actieve crontab-regels zelf (een crontab zonder kenmerk is niet per se schoon).
+ *
+ * @param string[] $homeKandidaten mappen waar de opstartbestanden kunnen staan
+ */
+function scanAccountPersistentie(array $homeKandidaten, array &$backdoorVondsten): void
+{
+    $kortRegel = function (string $regel): string {
+        $regel = trim(preg_replace('/\s+/', ' ', $regel));
+        return strlen($regel) > 200 ? substr($regel, 0, 200) . '…' : $regel;
+    };
+
+    // --- Crontab ---
+    $cronRegels = null;
+    $cronBron = '';
+    $uitgeschakeld = array_map('trim', explode(',', strtolower((string) ini_get('disable_functions'))));
+    if (function_exists('shell_exec') && !in_array('shell_exec', $uitgeschakeld, true)) {
+        // Exitcode erachter plakken: zonder crontab geeft "crontab -l" geen uitvoer maar een foutmelding ("no crontab
+        // for ..."), en dat moet "0 regels" opleveren, niet "niet te lezen".
+        $uitvoer = @shell_exec('crontab -l 2>&1; echo "__EXITCODE=$?"');
+        if (is_string($uitvoer) && preg_match('/__EXITCODE=(\d+)\s*$/', $uitvoer, $m)) {
+            $tekst = substr($uitvoer, 0, -strlen($m[0]));
+            if ($m[1] === '0') {
+                $cronRegels = preg_split('/\r?\n/', $tekst);
+                $cronBron = 'crontab -l';
+            } elseif (stripos($tekst, 'no crontab') !== false) {
+                $cronRegels = [];
+                $cronBron = 'crontab -l, geen crontab ingesteld';
+            }
+        }
+    }
+    if ($cronRegels === null) {
+        $gebruiker = function_exists('posix_getpwuid') && function_exists('posix_geteuid')
+            ? (string) (@posix_getpwuid(posix_geteuid())['name'] ?? '') : (string) @get_current_user();
+        if ($gebruiker !== '') {
+            foreach (['/var/spool/cron/' . $gebruiker, '/var/spool/cron/crontabs/' . $gebruiker] as $spool) {
+                if (@is_file($spool) && @is_readable($spool)) {
+                    $cronRegels = preg_split('/\r?\n/', (string) @file_get_contents($spool));
+                    $cronBron = $spool;
+                    break;
+                }
+            }
+        }
+    }
+    if ($cronRegels === null) {
+        echo "Crontab: niet te lezen (shell_exec uitgeschakeld en geen leesbaar spoolbestand) - controleer handmatig in het hostingpaneel\n";
+    } else {
+        $actief = array_values(array_filter(array_map('trim', $cronRegels), function ($r) {
+            return $r !== '' && $r[0] !== '#';
+        }));
+        echo 'Crontab (' . $cronBron . '): ' . count($actief) . " actieve regel(s)\n";
+        foreach ($actief as $regel) {
+            echo '  ' . $kortRegel($regel) . "\n";
+            $kenmerk = vindPersistentieKenmerk($regel);
+            if ($kenmerk !== null) {
+                $backdoorVondsten[] = [
+                    'naam' => 'crontab: ' . $kortRegel($regel),
+                    'reden' => 'KRITIEK - cronjob met kenmerk "' . $kenmerk . '" van een backdoor (gsocket of een proces onder een valse naam) - '
+                        . 'start de backdoor steeds opnieuw, ook na het verwijderen van de bestanden. Verwijder de regel in het hostingpaneel '
+                        . '(Cron Jobs) en laat de hostingpartij het proces stoppen',
+                    'risico' => 100,
+                    'gewijzigd' => date('Y-m-d H:i'),
+                ];
+            }
+        }
+    }
+
+    // --- Opstartbestanden van de shell ---
+    $gezien = [];
+    foreach ($homeKandidaten as $home) {
+        if (!is_string($home) || $home === '' || !@is_dir($home)) {
+            continue;
+        }
+        foreach (['.bashrc', '.bash_profile', '.profile'] as $naam) {
+            $pad = rtrim($home, '/') . '/' . $naam;
+            $echt = @realpath($pad);
+            if ($echt === false || isset($gezien[$echt]) || !@is_file($pad)) {
+                continue;
+            }
+            $gezien[$echt] = true;
+            if (!@is_readable($pad)) {
+                echo "Opstartbestand $pad: niet leesbaar\n";
+                continue;
+            }
+            $inhoud = (string) @file_get_contents($pad, false, null, 0, 1048576);
+            $treffers = [];
+            foreach (preg_split('/\r?\n/', $inhoud) as $nr => $regel) {
+                $kaal = ltrim($regel);
+                if ($kaal === '' || $kaal[0] === '#') {
+                    continue;
+                }
+                $kenmerk = vindPersistentieKenmerk($regel);
+                if ($kenmerk !== null) {
+                    $treffers[] = 'regel ' . ($nr + 1) . ' ("' . $kenmerk . '"): ' . $kortRegel($regel);
+                }
+            }
+            echo "Opstartbestand $pad: " . (empty($treffers) ? 'geen kenmerken' : count($treffers) . ' verdachte regel(s)') . "\n";
+            if (!empty($treffers)) {
+                $backdoorVondsten[] = [
+                    'naam' => $pad,
+                    'reden' => 'KRITIEK - opstartbestand van de shell start vermoedelijk een backdoor: ' . implode(' | ', $treffers)
+                        . '. Wordt uitgevoerd bij elke shell-login van het account. Verwijder de regel(s) en controleer ook de crontab',
+                    'risico' => 100,
+                    'bestandspad' => $pad,
+                    'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+                    'grootte' => strlen($inhoud),
+                ];
+            }
+        }
+    }
+}
+
+/**
+ * Leeg index.php (0 bytes): sommige extensies zetten die in hun mappen tegen het tonen van de mapinhoud, net als de
+ * index.html van Joomla zelf. Kan niets uitvoeren, dus geen backdoor.
+ */
+function isLegeIndexPhp(string $pad): bool
+{
+    return strtolower(basename($pad)) === 'index.php' && @is_file($pad) && @filesize($pad) === 0;
+}
+
 // Google Search Console-verificatiebestanden: altijd dit vaste patroon,
 // komt op bijna elke site voor, nooit een bedreiging.
 function isGoogleVerificatie($naam)
@@ -1625,6 +1957,88 @@ function scanTemplateDefacement(?array $dbInfo, array &$vondsten): void
         }
     } catch (\Throwable $e) {
         // #__template_styles ontbreekt of query mislukte - niet fataal
+    }
+}
+
+/**
+ * Kwaadaardige JCE-editorprofielen (tabel #__wf_profiles). Via het lek in JCE (CVE-2026-48907, juni 2026) konden
+ * aanvallers zonder in te loggen een editorprofiel importeren dat het uploaden van PHP toestaat, en daarmee steeds
+ * opnieuw een webshell neerzetten. Zo'n profiel staat in de database, niet in de bestanden: na het opruimen van de
+ * bestanden en het bijwerken van JCE blijft het staan, en daarmee de ingang. Aangetroffen profiel (juni 2026):
+ *   naam "J545316", ordering -99999 (altijd als eerste gekozen), types "1,8" (Public + Super Users),
+ *   plugins browser/image/media/link/file, params {"browser":{"filetypes":"images=jpg,...;files=php,txt,gif",
+ *   "upload":{"validate_mimetype":"0",...},"features":{"upload":1,...}}}.
+ *
+ * Signalen (per profiel samengevoegd tot één melding, risico = het hoogste):
+ *  - een uitvoerbare extensie (php, phtml, phar ...) in een lijst met toegestane bestandstypen in de params - 100;
+ *  - naam van de vorm J + cijfers, zoals bij de aanval - 95;
+ *  - toegankelijk voor Public (1) of Guest (9) én een plugin waarmee bestanden te beheren of te uploaden zijn - 85;
+ *  - controle op het bestandstype bij uploaden uitgezet (validate_mimetype 0) - 70;
+ *  - een sterk negatieve volgorde (ordering -1000 of lager), zodat het profiel altijd voorgaat - 70.
+ * Een profiel voor Public met alleen opmaakknoppen (bv. voor reacties van bezoekers) wordt dus niet gemeld.
+ */
+function scanJceProfielen(?array $dbInfo, array &$vondsten): void
+{
+    if ($dbInfo === null) {
+        return;
+    }
+
+    try {
+        $pdo = $dbInfo['pdo'];
+        $prefix = $dbInfo['prefix'];
+        $stmt = $pdo->query("SELECT * FROM {$prefix}wf_profiles");
+        if ($stmt === false) {
+            return;
+        }
+        $bestandsPlugins = ['browser', 'file', 'image', 'media', 'imgmanager', 'imgmanager_ext', 'mediamanager', 'filemanager', 'templatemanager'];
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rij) {
+            $naam = (string) ($rij['name'] ?? '');
+            $params = (string) ($rij['params'] ?? '');
+            $groepen = array_filter(array_map('trim', explode(',', (string) ($rij['types'] ?? ''))), 'strlen');
+            $plugins = array_filter(array_map('trim', explode(',', strtolower((string) ($rij['plugins'] ?? '')))), 'strlen');
+            $signalen = [];
+            $risico = 0;
+
+            if (preg_match('/(?:^|[=,;:"\s])(php[0-9s]?|phtml|phar|pht|shtml|cgi)(?=\s*(?:[,;"]|$))/i', $params, $m)) {
+                $signalen[] = 'staat het uploaden van "' . strtolower($m[1]) . '"-bestanden toe - ZEKER BACKDOOR (ingang voor webshells)';
+                $risico = max($risico, 100);
+            }
+            if (preg_match('/^J\d{4,}$/', $naam)) {
+                $signalen[] = 'naam van dezelfde vorm als bij de aanval op JCE (J + cijfers)';
+                $risico = max($risico, 95);
+            }
+            $publiek = array_intersect($groepen, ['1', '9']);
+            $metBestanden = array_intersect($plugins, $bestandsPlugins);
+            if (!empty($publiek) && !empty($metBestanden)) {
+                $signalen[] = 'toegankelijk zonder in te loggen (gebruikersgroep ' . implode('/', array_map(function ($g) {
+                    return $g === '1' ? 'Public' : 'Guest';
+                }, $publiek)) . ') met bestandsbeheer (' . implode(', ', $metBestanden) . ')';
+                $risico = max($risico, 85);
+            }
+            if (preg_match('/"validate_mimetype"\s*:\s*"?0"?/', $params)) {
+                $signalen[] = 'controle op het bestandstype bij uploaden uitgezet';
+                $risico = max($risico, 70);
+            }
+            if ((int) ($rij['ordering'] ?? 0) <= -1000) {
+                $signalen[] = 'volgorde ' . (int) $rij['ordering'] . ' (gaat altijd voor alle andere profielen)';
+                $risico = max($risico, 70);
+            }
+
+            if (empty($signalen)) {
+                continue;
+            }
+            $vondsten[] = [
+                'naam' => 'JCE-profiel: ' . $naam . ' (id ' . (int) ($rij['id'] ?? 0) . (empty($rij['published']) ? ', niet gepubliceerd' : '') . ')',
+                'reden' => 'KWAADAARDIG JCE-EDITORPROFIEL? Dit profiel ' . implode('; ', $signalen) . '. Via het lek in JCE (juni 2026) zetten '
+                    . 'aanvallers zo\'n profiel in de database; het blijft staan na het opruimen van de bestanden en het bijwerken van JCE. '
+                    . 'Niet zelf aangemaakt? Verwijderen via Componenten → JCE Editor → Profielen, en daarna images/ en tmp/ nalopen op PHP-bestanden.',
+                'risico' => $risico,
+                'gewijzigd' => date('Y-m-d H:i'),
+            ];
+        }
+    } catch (\Throwable $e) {
+        // #__wf_profiles ontbreekt (JCE niet geïnstalleerd) of query mislukte - niet fataal
     }
 }
 
@@ -3159,6 +3573,18 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
         }
     }
 
+    // PATROON 31: gsocket-signatuur (zie gsocketSignaturen()) - een PHP-bestand dat de gsocket-client binnenhaalt of
+    // start. Komt in een normaal Joomla-bestand niet voor.
+    if (!$verdacht) {
+        foreach (gsocketSignaturen() as $signaal) {
+            if (stripos($inhoud, $signaal) !== false) {
+                $reden = "gsocket-signatuur (\"{$signaal}\") aangetroffen - ZEKER BACKDOOR (start of downloadt een omgekeerde shell via een relayserver)";
+                $verdacht = true;
+                break;
+            }
+        }
+    }
+
     // PATROON 22: Cryptominer-signalen. Protocol-/toolnamen die specifiek
     // bij server-side cryptomining horen, ongeacht welke concrete pool
     // erachter zit - bewust GEEN dienstnaam zoals "Coinhive" (die dienst
@@ -4233,7 +4659,12 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
 
         // Akeeba Backup-archieven van deze site buiten de website-root: geen rechtencontrole. PHP maakt ze op veel
         // servers aan met 666, en elke nieuwe back-up gaf zo weer een nieuwe melding. Zie isAkeebaBackupArchiefVanDezeSite().
-        if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector
+        // Uitvoerbaar bestand (x-bit of ELF) buiten de website: KRITIEK, en dan geen tweede melding "afwijkende rechten"
+        // voor hetzelfde bestand. Ook binnen .cagefs/.cl.selector: daar zet een aanvaller juist graag iets neer; de
+        // systeembestanden van CloudLinux zelf (van root, niet beschrijfbaar) vallen af in uitvoerbaarBuitenWebsite().
+        $uitvoerbaarGemeld = !@is_dir($volledigPad) && meldUitvoerbaarBuitenWebsite($volledigPad, $startMap, $backdoorVondsten);
+
+        if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector && !$uitvoerbaarGemeld
             && !isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
             $afwijking = controleerBestandsrechten($volledigPad, @is_dir($volledigPad));
             if ($afwijking !== null) {
@@ -4340,6 +4771,14 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                 scanNietPhpBestandOpVerstopteCode($volledigPad, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden, $startMap);
             }
 
+            // gsocket-signatuur in een niet-PHP-bestand (ook binair): elk bestand buiten de website, en binnen de website
+            // alleen ELF-programma's (PHP-bestanden: zie PATROON 31). Een uitvoerbaar bestand buiten de website is
+            // hierboven al gemeld, inclusief signatuur.
+            if (!$uitGeheugen && !$heeftPhpUitvoerbareExtensie && !$uitvoerbaarGemeld
+                && (strpos($volledigPad, rtrim($startMap, '/') . '/') !== 0 || isElfBestand($volledigPad))) {
+                meldGsocketSignatuur($volledigPad, $startMap, $backdoorVondsten);
+            }
+
             // Gzip-payload met de extensie van een gewoon bestand (.less/.js/.png/.webp/.htm ...) - overal, niet alleen
             // in uploadmappen: de aangetroffen payloads stonden juist diep in administrator/components/.
             if (!$uitGeheugen && !$heeftPhpUitvoerbareExtensie) {
@@ -4358,7 +4797,8 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
             // Los PHP-bestand in een map van media/ die alleen voor statische bestanden is (js/css/images/...).
             // Joomla zelf zet daar nooit PHP neer; aangetroffen (september 2026): media/com_joomlaupdate/js/index.php,
             // media/plg_system_jooa11y/js/index.php, media/com_contenthistory/js/index.php.
-            if ($heeftPhpUitvoerbareExtensie
+            // Uitzondering: een leeg index.php (0 bytes) kan niets uitvoeren - zie isLegeIndexPhp().
+            if ($heeftPhpUitvoerbareExtensie && !isLegeIndexPhp($volledigPad)
                 && preg_match('#[/\\\\]media[/\\\\].+[/\\\\](js|css|scss|less|images|img|fonts|icons)[/\\\\][^/\\\\]+$#i', $volledigPad)) {
                 $backdoorVondsten[] = [
                     'naam' => str_replace($startMap, '', $volledigPad),
@@ -4384,7 +4824,14 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
                     // toch gemeld - met een eigen, lagere melding. Aangetroffen (oktober 2026): een site die de Akeeba-
                     // uitvoermap in images/ had gezet, waardoor ook de complete back-uparchieven (met configuration.php
                     // en de databasedump) publiek downloadbaar waren. Niet overslaan dus: zo blijft zichtbaar wat er staat.
-                    if (isNietUitvoerbaarPhpDatabestand($volledigPad)) {
+                    if (isLegeIndexPhp($volledigPad)) {
+                        // Leeg index.php: geen achterdeur (kan niets uitvoeren), wel ter info - in september 2026 stonden
+                        // zulke lege bestanden naast de zelfbeschermings-.htaccess van een webshellkit in images/.
+                        $redenImages = 'TER INFO: leeg index.php (0 bytes) in de afbeeldingsmap (images/) - kan niets uitvoeren, geen '
+                            . 'achterdeur. Meestal neergezet tegen het tonen van de mapinhoud; staat er een .htaccess of ander PHP-bestand '
+                            . 'naast, kijk dan of het bij een webshellkit hoort';
+                        $risicoImages = 20;
+                    } elseif (isNietUitvoerbaarPhpDatabestand($volledigPad)) {
                         $redenImages = 'Databestand met .php-extensie en een die()-kop (bv. een Akeeba-backuplog) in de afbeeldingsmap (images/) - '
                             . 'zelf geen achterdeur, maar wijst op een back-up- of logmap op een publiek bereikbare plek. Controleer of er '
                             . 'back-uparchieven naast staan en zet de uitvoermap terug naar een afgeschermde map';
@@ -4778,7 +5225,10 @@ function checkExtraScanpadTopNiveau($extraRoot, &$rootUnknown, array $negeren, $
             'reden_override' => 'onbekend item in extra scanpad (' . $extraRoot . ')',
         ];
 
-        $rechtenAfwijking = controleerBestandsrechten($volledigPad, $isMap);
+        // Uitvoerbaar bestand: wordt door scanRecursief() al als KRITIEK gemeld (zie uitvoerbaarBuitenWebsite()), dus
+        // hier geen melding "afwijkende rechten" - die zou daar bij het samenvoegen weer in terechtkomen.
+        $rechtenAfwijking = (!$isMap && uitvoerbaarBuitenWebsite($volledigPad, $startMap) !== null)
+            ? null : controleerBestandsrechten($volledigPad, $isMap);
         if ($rechtenAfwijking !== null) {
             $rootUnknown[] = $rechtenAfwijking;
         }
@@ -6610,6 +7060,12 @@ if (!$extraScanIngeschakeld) {
 
             foreach ($tussenBestanden as $tussenItem) {
                 $tussenBestand = $tussenPad . '/' . $tussenItem;
+                // Uitvoerbaar bestand of gsocket-signatuur (zie uitvoerbaarBuitenWebsite()) - los van de bestandsnaam.
+                // Binnen een webroot (site in een submap van public_html) is dit gewone website-inhoud: daar niet.
+                if (!$binnenWebroot && !meldUitvoerbaarBuitenWebsite($tussenBestand, $startMap, $backdoorVondsten)
+                    && !isPhpUitvoerbareExtensie($tussenItem)) {
+                    meldGsocketSignatuur($tussenBestand, $startMap, $backdoorVondsten);
+                }
                 if (isPhpUitvoerbareExtensie($tussenItem)) {
                     scanPhpVoorBackdoors($tussenBestand, $backdoorVondsten, $mogelijkLegitiem, $ignoreerBestanden);
                 } elseif (strtolower($tussenItem) === '.htaccess') {
@@ -6634,11 +7090,15 @@ if (!$extraScanIngeschakeld) {
                     || !isPhpUitvoerbareExtensie($tussenItem) || in_array($tussenBestand, $alGemeld, true)) {
                     continue;
                 }
+                $legeIndex = isLegeIndexPhp($tussenBestand);
                 $backdoorVondsten[] = [
                     'naam' => $tussenBestand,
-                    'reden' => 'PHP-bestand buiten de website-root, in een map van het hostingaccount ("' . $tussenPad . '") - de '
-                        . 'hostingpartij en Joomla zetten daar geen PHP neer; vrijwel zeker een achtergelaten backdoor, VERDACHT',
-                    'risico' => 80,
+                    'reden' => $legeIndex
+                        ? 'TER INFO: leeg index.php (0 bytes) buiten de website-root, in een map van het hostingaccount ("' . $tussenPad . '") - '
+                            . 'kan niets uitvoeren, geen achterdeur; wel ongebruikelijk op deze plek'
+                        : 'PHP-bestand buiten de website-root, in een map van het hostingaccount ("' . $tussenPad . '") - de '
+                            . 'hostingpartij en Joomla zetten daar geen PHP neer; vrijwel zeker een achtergelaten backdoor, VERDACHT',
+                    'risico' => $legeIndex ? 30 : 80,
                     'bestandspad' => $tussenBestand,
                     'gewijzigd' => date('Y-m-d H:i', @filemtime($tussenBestand) ?: time()),
                     'grootte' => (int) @filesize($tussenBestand),
@@ -6681,12 +7141,16 @@ if (!$extraScanIngeschakeld) {
                 || !isPhpUitvoerbareExtensie($rootItem) || in_array($rootBestand, $alGemeld, true)) {
                 continue;
             }
+            $legeIndex = isLegeIndexPhp($rootBestand);
             $backdoorVondsten[] = [
                 'naam' => $rootBestand,
-                'reden' => 'PHP-bestand direct in de accountroot ("' . $extraScanRootAbsoluut . '") - de hostingpartij en Joomla zetten daar geen '
-                    . 'PHP neer; een achtergelaten backdoor of een vergeten eigen script (bv. een eenmalig herstelscript). Controleren en '
-                    . 'verwijderen, VERDACHT',
-                'risico' => 80,
+                'reden' => $legeIndex
+                    ? 'TER INFO: leeg index.php (0 bytes) direct in de accountroot ("' . $extraScanRootAbsoluut . '") - kan niets uitvoeren, '
+                        . 'geen achterdeur; wel ongebruikelijk op deze plek'
+                    : 'PHP-bestand direct in de accountroot ("' . $extraScanRootAbsoluut . '") - de hostingpartij en Joomla zetten daar geen '
+                        . 'PHP neer; een achtergelaten backdoor of een vergeten eigen script (bv. een eenmalig herstelscript). Controleren en '
+                        . 'verwijderen, VERDACHT',
+                'risico' => $legeIndex ? 30 : 80,
                 'bestandspad' => $rootBestand,
                 'gewijzigd' => date('Y-m-d H:i', @filemtime($rootBestand) ?: time()),
                 'grootte' => (int) @filesize($rootBestand),
@@ -6702,6 +7166,12 @@ if (!$extraScanIngeschakeld) {
         . (count($rechtenAfwijkingenExtra) + $rechtenTopNiveau) . " afwijkende rechten gesignaleerd)."
         . ' Standaard overgeslagen: ' . implode(', ', $standaardExtraScanpadNegeren) . '.'
         . (!empty($extraScanPadNegerenEigen) ? ' Zelf ook overgeslagen: ' . implode(', ', $extraScanPadNegerenEigen) . '.' : '');
+
+    // Herkend statistiekenscript van de hostingpartij (zie isAwstatsScriptVanHost()): niet gemeld, wel vermeld.
+    if (!empty($GLOBALS['herkendeAwstatsScripts'])) {
+        $extraScanMelding .= ' Herkend als AWStats-script van de hostingpartij (niet gemeld als uitvoerbaar bestand): '
+            . implode(', ', array_keys($GLOBALS['herkendeAwstatsScripts'])) . '.';
+    }
 
     // Herkende Akeeba Backup-archieven van deze site (zie isAkeebaBackupArchiefVanDezeSite()): niet gemeld, wel vermeld.
     $herkendeArchieven = array_keys($GLOBALS['herkendeAkeebaArchieven'] ?? []);
@@ -6802,6 +7272,28 @@ if (is_file($adminDefines)) {
     ];
 }
 
+// Crontab en opstartbestanden van de shell van het account (zie scanAccountPersistentie()) - ook als het extra scanpad
+// uit staat: de crontab hoort bij het account, niet bij een map. De homemap: volgens het systeem, volgens HOME, en de
+// map van het extra scanpad (bij veel hostingpartijen dezelfde).
+$homeKandidaten = [];
+if (function_exists('posix_getpwuid') && function_exists('posix_geteuid')) {
+    $pwInfo = @posix_getpwuid(posix_geteuid());
+    if (is_array($pwInfo) && !empty($pwInfo['dir'])) {
+        $homeKandidaten[] = $pwInfo['dir'];
+    }
+}
+if (getenv('HOME')) {
+    $homeKandidaten[] = getenv('HOME');
+}
+if (!empty($extraScanRootAbsoluut)) {
+    $homeKandidaten[] = $extraScanRootAbsoluut;
+}
+try {
+    scanAccountPersistentie(array_values(array_unique($homeKandidaten)), $backdoorVondsten);
+} catch (\Throwable $e) {
+    echo 'Crontab/opstartbestanden: controle mislukt (' . $e->getMessage() . ")\n";
+}
+
 // Meldingen over hetzelfde bestand (inhoudspatroon, cloaking, kernintegriteit) tot één vondst samenvoegen.
 voegDubbeleVondstenSamen($backdoorVondsten, $rootLevelUnknown);
 
@@ -6827,6 +7319,7 @@ $geenJoomlaTekst = 'Geen Joomla-installatie gevonden (geen configuration.php en 
 $dbVerbinding = verbindMetJoomlaDatabase($startMap);
 scanRogueSuperUsers($dbVerbinding, $databaseVondsten);
 scanTemplateDefacement($dbVerbinding, $databaseVondsten);
+scanJceProfielen($dbVerbinding, $databaseVondsten);
 
 // Compleet Super Users-overzicht (naam/gebruikersnaam/e-mail/aangemaakt/
 // laatst ingelogd/geblokkeerd) - aanvullend op scanRogueSuperUsers()

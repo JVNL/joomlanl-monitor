@@ -1,5 +1,28 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.40 - 2026-10-31
+
+### Backdoors buiten de website die geen PHP zijn (`scan_template.php`)
+Een gsocket-backdoor (een Linux-programma dat een omgekeerde shell opzet via een relayserver) in `~/.config/htop/` werd door het extra scanpad alleen gemeld als "Afwijkende rechten: 755" (LAAG · 25). Het is geen PHP, dus geen enkele inhoudscontrole keek ernaar. Zo'n programma draait als proces van het account en wordt via cron of een opstartbestand van de shell steeds opnieuw gestart.
+
+- **Uitvoerbare bestanden buiten de website.** Elk bestand buiten de website met een x-bit in de rechten, of met de kop van een Linux-programma (ELF), wordt nu gemeld als KRITIEK (ZEER HOOG · 95), in plaats van als afwijkende rechten. Geldt voor het extra scanpad (ook `.cagefs`/`.cl.selector`), de accountroot en de tussenliggende mappen tot de website. Niet: bestanden van een andere eigenaar (bv. root) waarin het account niet kan schrijven, zoals de koppelingen van CloudLinux naar de PHP-programma's van de server.
+- **Uitzondering: het AWStats-script van DirectAdmin** (`domains/<domein>/awstats/awstats.pl`, door de hostingpartij met rechten 755 neergezet). Het telt niet als uitvoerbaar bestand als het byte voor byte gelijk is aan het origineel van de server (`/usr/local/awstats/cgi-bin/awstats.pl`). Is dat origineel niet leesbaar, dan moet het een Perl-script met de kop van AWStats zijn. Een Linux-programma onder die naam, of een ander bestand in die map, wordt gewoon gemeld. De controle op gsocket-signaturen blijft voor dit bestand gelden. Herkende scripts staan in de melding over het extra scanpad.
+- **Nieuw: gsocket-signaturen**, ook in binaire bestanden: `GS_ARGS`, `GSOCKET_ARGS`, `gs-netcat` en de domeinnaam van de relayserver van gsocket. Gemeld als ZEKER BACKDOOR (100). Gecontroleerd in elk bestand buiten de website (tot 16 MB), in Linux-programma's binnen de website, en in PHP-bestanden (PATROON 31).
+- **Nieuw: crontab en opstartbestanden van de shell.** De crontab van het account (via `crontab -l`, of het spoolbestand als dat leesbaar is) en `.bashrc`, `.bash_profile` en `.profile` worden doorzocht op `defunct`, `exec -a` en de gsocket-signaturen. Elke treffer is KRITIEK (100). In de ruwe scanuitvoer staan de actieve crontab-regels, of dat de crontab niet te lezen was. Draait ook als het extra scanpad uit staat.
+
+### Kwaadaardige JCE-editorprofielen (`scan_template.php`)
+Na het lek in JCE (juni 2026) bleef op opgeschoonde sites het profiel van de aanvaller in de database staan. Dat profiel staat het uploaden van PHP toe, dus de ingang bleef open, ook na het opruimen van de bestanden en het bijwerken van JCE.
+
+- **Nieuw: `scanJceProfielen()`** controleert de tabel met JCE-profielen (`#__wf_profiles`) en meldt per verdacht profiel één databasevondst:
+  - een uitvoerbare extensie (php, phtml, phar ...) bij de toegestane bestandstypen: ZEKER BACKDOOR (100);
+  - een naam van de vorm J + cijfers, zoals bij de aanval (95);
+  - toegankelijk voor Public of Guest met een plugin voor bestandsbeheer of uploaden (85);
+  - controle op het bestandstype bij uploaden uitgezet, of een volgorde van -1000 of lager (70).
+- Een profiel voor bezoekers met alleen opmaakknoppen (bv. voor reacties) wordt niet gemeld. Zonder JCE wordt de controle overgeslagen.
+
+### Leeg index.php (`scan_template.php`)
+Een leeg `index.php` (0 bytes) kan niets uitvoeren en wordt niet meer als achterdeur gemeld. In een map voor statische bestanden onder `media/` vervalt de melding; in `images/` en buiten de website-root blijft een melding ter info (LAAG).
+
 ## 1.39 - 2026-10-28
 
 ### Nieuw: droppers herkennen (`scan_template.php`)

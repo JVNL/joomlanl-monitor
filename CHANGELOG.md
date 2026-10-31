@@ -1,5 +1,19 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.41 - 2026-10-31
+
+### AWStats-script ten onrechte als KRITIEK gemeld (`scan_template.php`)
+Sinds 1.40 werd het AWStats-script van DirectAdmin (`domains/<domein>/awstats/awstats.pl`) op sommige servers toch als "uitvoerbaar bestand buiten de website" (KRITIEK) gemeld. Twee oorzaken:
+
+- **Eerste regel `#!/usr/bin/awstats` in plaats van `#!/usr/bin/perl`.** Zo staat het script op sommige DirectAdmin-servers, met verder ongewijzigde AWStats-code. De herkenning eiste "perl" in die regel. Nu telt ook "awstats".
+- **Origineel van de server leesbaar, maar een andere versie.** Dan moest het script er byte voor byte gelijk aan zijn. DirectAdmin werkt de kopie in de domeinmap niet bij na een update van AWStats op de server, dus een oudere kopie viel af. Nu geldt dan ook de herkenning op de kop van het script.
+- Een Linux-programma onder de naam `awstats.pl`, of een ander bestand in die map, wordt nog steeds gemeld. De controle op gsocket-signaturen blijft gelden.
+- **Nieuw in de ruwe scanuitvoer** (regel "Extra scanpad"): per script hoe het is herkend, met de versie uit het script en of het afwijkt van het origineel. Of waarom het niet is herkend.
+
+### JCE-profiel met alleen "mimetype-controle uit" (`scan_template.php`)
+Een profiel waarin alleen de controle op het bestandstype bij uploaden uitstond (`validate_mimetype`), werd gemeld als "KWAADAARDIG JCE-EDITORPROFIEL?" (HOOG · 70). Die instelling wordt vaak bewust uitgezet, bijvoorbeeld voor svg- of webp-bestanden. Los geeft dit nu een melding ter info (LAAG · 30). Samen met een ander signaal (php-uploads, een naam J + cijfers, toegang voor bezoekers met bestandsbeheer, sterk negatieve volgorde) staat het gewoon in de melding van dat profiel.
+- Bij het signaal php-uploads staat in de melding nu ook het stukje van de profielinstellingen waarin het staat, zodat te zien is of het echt om toegestane bestandstypen gaat.
+
 ## 1.40 - 2026-10-31
 
 ### Backdoors buiten de website die geen PHP zijn (`scan_template.php`)

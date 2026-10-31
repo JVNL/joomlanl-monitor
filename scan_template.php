@@ -335,12 +335,14 @@ function isElfBestand(string $pad): bool
 
 /**
  * Het statistiekenscript van DirectAdmin: domains/<domein>/awstats/awstats.pl, door de hostingpartij met rechten 755
- * in het account gezet. Herkend als het:
- *  1. precies op die plek staat en zo heet, en
- *  2. byte voor byte gelijk is aan het origineel van de server (/usr/local/awstats/cgi-bin/awstats.pl), of - als dat
- *     origineel niet leesbaar is (bv. door open_basedir) - begint met een Perl-regel en in de eerste 8 KB de kop van
- *     AWStats heeft.
- * Een ELF-programma onder die naam, of een ander bestand in die map, valt er niet onder. De controle op gsocket-
+ * in het account gezet. Herkend als het precies op die plek staat en zo heet, én:
+ *  - byte voor byte gelijk is aan het origineel van de server (/usr/local/awstats/cgi-bin/awstats.pl), of
+ *  - een Perl-script is (eerste regel #!...perl, of #!/usr/bin/awstats zoals bij een DirectAdmin-server met AWStats 7.6
+ *    aangetroffen) met de kop van AWStats in de eerste 8 KB, en geen ELF-programma.
+ * Het tweede geldt ook als het origineel wél leesbaar is maar afwijkt: DirectAdmin zet de kopie neer bij het aanzetten
+ * van de statistieken en werkt hem daarna niet bij, dus na een update van AWStats op de server is de kopie gewoon een
+ * oudere versie. In de ruwe scanuitvoer staat per script hoe het is herkend (of waarom niet), met de versie uit het
+ * script zelf, zodat dat na te gaan is. Een ander bestand in die map valt er niet onder. De controle op gsocket-
  * signaturen blijft voor dit bestand gewoon gelden (zie scanRecursief()).
  */
 function isAwstatsScriptVanHost(string $pad): bool
@@ -348,18 +350,40 @@ function isAwstatsScriptVanHost(string $pad): bool
     if (!preg_match('#/domains/[^/]+/awstats/awstats\.pl$#', str_replace('\\', '/', $pad)) || !@is_readable($pad)) {
         return false;
     }
+    static $uitkomst = [];
+    if (isset($uitkomst[$pad])) {
+        return $uitkomst[$pad];
+    }
+
+    $kop = (string) @file_get_contents($pad, false, null, 0, 65536);
+    $versie = preg_match('/\$VERSION\s*=\s*["\']([^"\']{1,60})["\']/', $kop, $m) ? $m[1] : 'onbekend';
+    if (preg_match('/\$REVISION\s*=\s*["\']([^"\']{1,20})["\']/', $kop, $m)) {
+        $versie = str_replace('$REVISION', $m[1], $versie);
+    }
+    $perlKop = strpos($kop, "\x7fELF") !== 0 && (bool) preg_match('#^\#![^\n]*(?:perl|awstats)#', $kop)
+        && stripos(substr($kop, 0, 8192), 'AWStats') !== false;
+
     $origineel = '/usr/local/awstats/cgi-bin/awstats.pl';
-    if (@is_file($origineel) && @is_readable($origineel)) {
+    $origineelLeesbaar = @is_file($origineel) && @is_readable($origineel);
+    $gelijk = false;
+    if ($origineelLeesbaar) {
         $eigen = @hash_file('sha256', $pad);
-        $herkend = is_string($eigen) && hash_equals((string) @hash_file('sha256', $origineel), $eigen);
+        $gelijk = is_string($eigen) && hash_equals((string) @hash_file('sha256', $origineel), $eigen);
+    }
+
+    if ($gelijk) {
+        $hoe = 'gelijk aan het origineel van de server';
+    } elseif ($perlKop) {
+        $hoe = 'Perl-script met AWStats-kop, versie ' . $versie . ($origineelLeesbaar ? ' (wijkt af van het origineel van de server: andere versie?)' : ' (origineel van de server niet leesbaar)');
     } else {
-        $kop = (string) @file_get_contents($pad, false, null, 0, 8192);
-        $herkend = (bool) preg_match('#^\#![^\n]*perl#', $kop) && stripos($kop, 'AWStats') !== false && strpos($kop, "\x7fELF") !== 0;
+        $hoe = null;
+        $GLOBALS['nietHerkendeAwstatsScripts'][$pad] = (strpos($kop, "\x7fELF") === 0 ? 'ELF-programma onder de naam awstats.pl' : 'geen Perl-script met AWStats-kop (eerste regel: '
+            . preg_replace('/[^\x20-\x7e]/', '?', substr((string) strtok($kop, "\n"), 0, 60)) . ')') . ($origineelLeesbaar ? ' en niet gelijk aan het origineel van de server' : '');
     }
-    if ($herkend) {
-        $GLOBALS['herkendeAwstatsScripts'][$pad] = true;
+    if ($hoe !== null) {
+        $GLOBALS['herkendeAwstatsScripts'][$pad] = $hoe;
     }
-    return $herkend;
+    return $uitkomst[$pad] = ($hoe !== null);
 }
 
 /**
@@ -1973,8 +1997,9 @@ function scanTemplateDefacement(?array $dbInfo, array &$vondsten): void
  *  - een uitvoerbare extensie (php, phtml, phar ...) in een lijst met toegestane bestandstypen in de params - 100;
  *  - naam van de vorm J + cijfers, zoals bij de aanval - 95;
  *  - toegankelijk voor Public (1) of Guest (9) én een plugin waarmee bestanden te beheren of te uploaden zijn - 85;
- *  - controle op het bestandstype bij uploaden uitgezet (validate_mimetype 0) - 70;
- *  - een sterk negatieve volgorde (ordering -1000 of lager), zodat het profiel altijd voorgaat - 70.
+ *  - een sterk negatieve volgorde (ordering -1000 of lager), zodat het profiel altijd voorgaat - 70;
+ *  - controle op het bestandstype bij uploaden uitgezet (validate_mimetype 0): alleen meegenomen naast een ander
+ *    signaal. Los is het een melding ter info (30): het wordt ook bewust uitgezet, bv. voor svg/webp.
  * Een profiel voor Public met alleen opmaakknoppen (bv. voor reacties van bezoekers) wordt dus niet gemeld.
  */
 function scanJceProfielen(?array $dbInfo, array &$vondsten): void
@@ -2000,8 +2025,12 @@ function scanJceProfielen(?array $dbInfo, array &$vondsten): void
             $signalen = [];
             $risico = 0;
 
-            if (preg_match('/(?:^|[=,;:"\s])(php[0-9s]?|phtml|phar|pht|shtml|cgi)(?=\s*(?:[,;"]|$))/i', $params, $m)) {
-                $signalen[] = 'staat het uploaden van "' . strtolower($m[1]) . '"-bestanden toe - ZEKER BACKDOOR (ingang voor webshells)';
+            if (preg_match('/(?:^|[=,;:"\s])(php[0-9s]?|phtml|phar|pht|shtml|cgi)(?=\s*(?:[,;"]|$))/i', $params, $m, PREG_OFFSET_CAPTURE)) {
+                // Stukje van de params rond de treffer meegeven, zodat te zien is in welke instelling het staat.
+                $begin = max(0, $m[1][1] - 60);
+                $context = preg_replace('/\s+/', ' ', substr($params, $begin, 100));
+                $signalen[] = 'staat het uploaden van "' . strtolower($m[1][0]) . '"-bestanden toe - ZEKER BACKDOOR (ingang voor webshells) [in de '
+                    . 'params: …' . $context . '…]';
                 $risico = max($risico, 100);
             }
             if (preg_match('/^J\d{4,}$/', $naam)) {
@@ -2016,17 +2045,29 @@ function scanJceProfielen(?array $dbInfo, array &$vondsten): void
                 }, $publiek)) . ') met bestandsbeheer (' . implode(', ', $metBestanden) . ')';
                 $risico = max($risico, 85);
             }
-            if (preg_match('/"validate_mimetype"\s*:\s*"?0"?/', $params)) {
-                $signalen[] = 'controle op het bestandstype bij uploaden uitgezet';
-                $risico = max($risico, 70);
-            }
+            // Zwak signaal: wordt ook bewust uitgezet (bv. om svg/webp te kunnen uploaden). Alleen meetellen naast een
+            // ander signaal; los levert het een melding ter info op (zie hieronder).
+            $mimetypeUit = (bool) preg_match('/"validate_mimetype"\s*:\s*"?0"?/', $params);
             if ((int) ($rij['ordering'] ?? 0) <= -1000) {
                 $signalen[] = 'volgorde ' . (int) $rij['ordering'] . ' (gaat altijd voor alle andere profielen)';
                 $risico = max($risico, 70);
             }
 
             if (empty($signalen)) {
+                if ($mimetypeUit) {
+                    $vondsten[] = [
+                        'naam' => 'JCE-profiel: ' . $naam . ' (id ' . (int) ($rij['id'] ?? 0) . (empty($rij['published']) ? ', niet gepubliceerd' : '') . ')',
+                        'reden' => 'TER INFO: in dit JCE-profiel staat de controle op het bestandstype bij uploaden uit (validate_mimetype). '
+                            . 'Wordt vaak bewust uitgezet, bv. voor svg- of webp-bestanden; verder niets verdachts aan dit profiel. '
+                            . 'Bewust zo ingesteld? Dan kan deze melding vertrouwd worden.',
+                        'risico' => 30,
+                        'gewijzigd' => date('Y-m-d H:i'),
+                    ];
+                }
                 continue;
+            }
+            if ($mimetypeUit) {
+                $signalen[] = 'controle op het bestandstype bij uploaden uitgezet';
             }
             $vondsten[] = [
                 'naam' => 'JCE-profiel: ' . $naam . ' (id ' . (int) ($rij['id'] ?? 0) . (empty($rij['published']) ? ', niet gepubliceerd' : '') . ')',
@@ -7168,9 +7209,11 @@ if (!$extraScanIngeschakeld) {
         . (!empty($extraScanPadNegerenEigen) ? ' Zelf ook overgeslagen: ' . implode(', ', $extraScanPadNegerenEigen) . '.' : '');
 
     // Herkend statistiekenscript van de hostingpartij (zie isAwstatsScriptVanHost()): niet gemeld, wel vermeld.
-    if (!empty($GLOBALS['herkendeAwstatsScripts'])) {
-        $extraScanMelding .= ' Herkend als AWStats-script van de hostingpartij (niet gemeld als uitvoerbaar bestand): '
-            . implode(', ', array_keys($GLOBALS['herkendeAwstatsScripts'])) . '.';
+    foreach ($GLOBALS['herkendeAwstatsScripts'] ?? [] as $awPad => $awHoe) {
+        $extraScanMelding .= ' Herkend als AWStats-script van de hostingpartij (niet gemeld als uitvoerbaar bestand): ' . $awPad . ' - ' . $awHoe . '.';
+    }
+    foreach ($GLOBALS['nietHerkendeAwstatsScripts'] ?? [] as $awPad => $awWaarom) {
+        $extraScanMelding .= ' NIET herkend als AWStats-script (wel gemeld): ' . $awPad . ' - ' . $awWaarom . '.';
     }
 
     // Herkende Akeeba Backup-archieven van deze site (zie isAkeebaBackupArchiefVanDezeSite()): niet gemeld, wel vermeld.

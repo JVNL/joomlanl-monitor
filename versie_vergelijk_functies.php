@@ -299,8 +299,18 @@ function normaliseerAuteur(?string $auteur): string
     ];
 
     $auteur = strtr($auteur, $vervangingen);
+    $auteur = trim($auteur);
 
-    return trim($auteur);
+    // Een auteursveld dat alleen een domeinnaam is ("JoomShaper.com", "www.tassos.gr") geldt als dezelfde auteur als
+    // de naam zonder domein ("JoomShaper"). Sommige ontwikkelaars wisselen dat per extensie af; zonder deze stap werden
+    // onderdelen van hetzelfde product (bv. de plugins van SP Page Builder naast het component) niet samengevoegd.
+    // Alleen als het hele veld één woord met een punt erin is - een naam als "Regular Labs (Peter van Westen)" blijft
+    // ongewijzigd.
+    if (preg_match('/^(?:www\.)?([a-z0-9][a-z0-9-]*)\.[a-z]{2,10}$/', $auteur, $m)) {
+        $auteur = $m[1];
+    }
+
+    return $auteur;
 }
 
 /**
@@ -620,6 +630,20 @@ function haalHerkomstToken(array $extensie): string
 }
 
 /**
+ * Herkomst-token op basis van alleen het element, ook voor een plugin in een eigen pluginmap. Gebruikt als tweede
+ * kans bij het versmelten (versmeltOpTokenPrefix()): een integratieplugin staat soms in de pluginmap van het ANDERE
+ * product (bv. de plugin "sppagebuilder" van SP Page Builder in de map "spsimpleportfolio"), waardoor het gewone
+ * token (map:spsimpleportfolio) hem nooit aan zijn eigen product koppelde.
+ */
+function haalElementToken(array $extensie): string
+{
+    $element = strtolower(trim($extensie['element'] ?? ''));
+    $element = preg_replace('/^(com|mod|plg|pkg|lib|file)_/', '', $element);
+    $eersteDeel = explode('_', $element)[0] ?? '';
+    return $eersteDeel !== '' ? $eersteDeel : $element;
+}
+
+/**
  * Pass 1: groepeert extensies op auteur + herkomst-token (map/element).
  * Het versienummer telt hier bewust NIET mee in de sleutel - losse
  * onderdelen van hetzelfde product hebben in de praktijk vaak een net
@@ -812,10 +836,12 @@ function groepeerOpHerkomst(array $extensies): array
                 'representatief_naam'    => $extensie['naam'] ?? '',
                 'representatief_versie'  => $extensie['versie'] ?? null,
                 'token'            => $token,
+                'element_tokens'   => [],
             ];
         }
 
         $groep = &$groepen[$sleutel];
+        $groep['element_tokens'][] = haalElementToken($extensie);
 
         $groep['namen'][] = $extensie['naam'] ?? '';
         $groep['sleutels'][] = maakExtensieSleutel($extensie['type'] ?? '', $extensie['element'] ?? '');
@@ -945,6 +971,7 @@ function groepeerOpHerkomst(array $extensies): array
             'representatief_element' => $groep['representatief_element'],
             'sleutels'         => array_values(array_unique($groep['sleutels'])),
             'token'            => $groep['token'],
+            'element_tokens'   => array_values(array_unique($groep['element_tokens'] ?? [])),
         ];
     }
 
@@ -1090,6 +1117,7 @@ function combineerGegroepeerdeProducten(array $a, array $b): array
         'representatief_element' => $primair['representatief_element'],
         'sleutels'         => array_values(array_unique(array_merge($a['sleutels'] ?? [], $b['sleutels'] ?? []))),
         'token'            => $primair['token'],
+        'element_tokens'   => array_values(array_unique(array_merge($a['element_tokens'] ?? [], $b['element_tokens'] ?? []))),
     ];
 }
 
@@ -1127,13 +1155,24 @@ function versmeltOpTokenPrefix(array $groepen): array
                     continue;
                 }
 
-                $tokenA = preg_replace('/^(map|element):/', '', $huidig['token']);
-                $tokenB = preg_replace('/^(map|element):/', '', $kandidaat['token']);
+                // Eerst het gewone token (map of element), daarna als tweede kans de element-tokens van de onderdelen
+                // (zie haalElementToken()): een plugin in de pluginmap van een ander product hoort zo toch bij zijn
+                // eigen product.
+                $tokensA = array_unique(array_merge([preg_replace('/^(map|element):/', '', $huidig['token'])], $huidig['element_tokens'] ?? []));
+                $tokensB = array_unique(array_merge([preg_replace('/^(map|element):/', '', $kandidaat['token'])], $kandidaat['element_tokens'] ?? []));
+                $tokensPassen = false;
+                foreach ($tokensA as $tokenA) {
+                    foreach ($tokensB as $tokenB) {
+                        $gedeeld = gedeeldeVoorvoegselLengte($tokenA, $tokenB);
+                        $kortste = min(strlen($tokenA), strlen($tokenB));
+                        if ($kortste >= 5 && $gedeeld === $kortste) {
+                            $tokensPassen = true;
+                            break 2;
+                        }
+                    }
+                }
 
-                $gedeeld = gedeeldeVoorvoegselLengte($tokenA, $tokenB);
-                $kortste = min(strlen($tokenA), strlen($tokenB));
-
-                if ($kortste >= 5 && $gedeeld === $kortste) {
+                if ($tokensPassen) {
                     // Niet samenvoegen als de kant die zou worden
                     // "opgeslokt" (de secundaire kant) al ZELF een bekende
                     // status heeft - dan heeft dit onderdeel kennelijk een

@@ -1,30 +1,26 @@
-# joomlanl-monitor
+# Joomla!NL Websitesmonitor
 
-*[Lees dit in het Nederlands](README.nl.md)*
+Monitor voor Joomla-websites: controleert of je sites online zijn, of Joomla en de extensies up-to-date zijn, en scant de bestanden en de database op achterdeuren en andere sporen van een hack. De monitor en alle meldingen zijn in het Nederlands.
 
-Monitoring tool for Joomla websites: checks online status, installed extensions, and known exploits.
+## Installeren
 
-## Installing or updating
+Zie [LEES_DIT_EERST.txt](LEES_DIT_EERST.txt) voor de complete installatie-instructies.
 
-Every [release](../../releases) provides two kinds of files:
+## Bijwerken
 
-- **Source code (zip)** — a complete snapshot of the entire tool as it was at that release. Use this for a fresh install, or if you'd rather replace everything at once instead of updating step by step.
-- **`update-vX.zip`** — contains *only* the files that changed since the previous release. Use this if you already have the previous version running and just want to update it.
+Elke [release](../../releases) heeft twee soorten bestanden:
 
-### Important: updates are cumulative, not skippable
+- **`update-vX.XX.zip`**: alleen de bestanden die sinds de *vorige* release zijn veranderd. Upload de inhoud over je bestaande installatie heen.
+- **Source code (zip)**: de complete monitor van die versie.
 
-Each `update-vX.zip` only contains what changed compared to the *immediately preceding* version — not compared to whatever version you happen to be running.
+De update-zips moet je op volgorde toepassen. Loop je meer dan één versie achter, gebruik dan de **Source code (zip)** van de laatste release en zet de monitor schoon opnieuw neer. Hoe dat gaat zonder je sites en instellingen kwijt te raken, staat in [LEES_DIT_EERST.txt](LEES_DIT_EERST.txt).
 
-If you're several versions behind, you need to apply each update in order:
+Database-aanpassingen gaan vanzelf zodra je de monitorpagina opent. De scanscripts op je sites werken zichzelf bij bij de volgende scan.
 
-- v1.18 -> apply update-v1.19.zip -> now on v1.19
-- v1.19 -> apply update-v1.20.zip -> now on v1.20
-- v1.20 -> apply update-v1.21.zip -> now on v1.21
+## Wat zit er nooit in een pakket
 
-Grabbing only the latest `update-vX.zip` while running an older version will leave out changes from the versions in between.
+`config.php`, `geheime_sleutel.php` en `installatie.voltooid` horen bij je eigen installatie en worden door de installatiewizard (`installeer.php`) aangemaakt. Overschrijf of deel ze nooit.
 
-**Alternative:** instead of applying multiple updates in sequence, you can download the **Source code (zip)** of the latest release and use it as a fresh install/overwrite instead. This gives the same end result in one step. Note: if any release included a database migration (a script like `auto_migratie.php`), make sure to still run that after overwriting the files — copying files alone won't apply database changes.
+## Wijzigingen
 
-### What's excluded
-
-`config.php`, `geheime_sleutel.php` and `installatie.voltooid` are never part of these packages — they're specific to your own installation and are created by the installer (`installeer.php`).
+Zie [CHANGELOG.md](CHANGELOG.md), of de knop "Wijzigingsgeschiedenis" onder Configuratie in de monitor.

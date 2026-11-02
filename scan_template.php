@@ -6611,8 +6611,6 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
 // Staat bewust ná het beheersysteem hierboven (Bekijk/Quarantaine/Blokkeer/
 // Verwijder): die acties verwachten een schone JSON-respons en eindigen
 // altijd zelf met exit(), dus dit codepad wordt daarbij nooit bereikt.
-echo "=== ZELF-BIJWERKEN ===\n";
-
 // Wordt uitsluitend door dit script zelf gezet (zie hieronder), bij zo'n
 // herhaalde aanroep ná een update - voorkomt een oneindige lus in het (zeer
 // onwaarschijnlijke) geval dat de hash-vergelijking na het bijwerken
@@ -6621,6 +6619,14 @@ $ditIsEenZelfherhaling = ($_SERVER['HTTP_X_MONITOR_ZELF_HERHALING'] ?? '') === '
 
 $scriptMapVoorLog = trim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
 $domein = ($_SERVER['HTTP_HOST'] ?? 'onbekend') . ($scriptMapVoorLog !== '' ? '/' . $scriptMapVoorLog : '');
+
+// Eerste regel van de ruwe uitvoer: welke site dit is. Wie de uitvoer in een teksteditor plakt en opslaat, krijgt zo
+// meteen een herkenbare bestandsnaam voorgesteld. Niet bij de herhaalde aanroep na een update: die uitvoer komt onder
+// de kop van de eerste aanroep te staan.
+if (!$ditIsEenZelfherhaling) {
+    echo "Ruwe scan " . $domein . " " . date('Y-m-d H.i') . "\n";
+}
+echo "=== ZELF-BIJWERKEN ===\n";
 
 if ($ditIsEenZelfherhaling) {
     echo "✓ Draait al met de zojuist bijgewerkte versie.\n";

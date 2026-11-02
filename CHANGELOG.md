@@ -1,5 +1,25 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.42 - 2026-11-01
+
+### Ruwe scanuitvoer begint met de site (`scan_template.php`)
+De eerste regel van de ruwe scanuitvoer is nu "Ruwe scan <domein> <datum tijd>", vóór "=== ZELF-BIJWERKEN ===". Zie je meerdere uitvoeren naast elkaar, dan zie je meteen welke site het is. Plak je de uitvoer in een teksteditor en sla je op, dan stelt die die regel als bestandsnaam voor.
+
+### Installatie-instructies en README (`LEES_DIT_EERST.txt`, `README.md`)
+- `LEES_DIT_EERST.txt` bevat nu echte installatie-instructies: wat je nodig hebt, installatie, configuratie (o.a. dat er zonder aangevinkte meldingen nooit een mail komt, en dat alleen sites in de categorie "eigen" meetellen), sites toevoegen, cronjob, bijwerken, en schoon opnieuw neerzetten zonder sites en instellingen kwijt te raken.
+- De README is alleen nog in het Nederlands, net als de monitor zelf. De Engelse versie is vervallen.
+
+### Niet-actieve extensies in het klantrapport (`klantrapport.php`)
+- Nieuw onderdeel bij "Extensies": extensies die geïnstalleerd zijn maar helemaal uitstaan, met het advies ze te verwijderen in plaats van alleen uit te schakelen (de bestanden staan er nog, en een lek erin is vaak gewoon te misbruiken).
+- Ook in de samenvatting ("niet-actieve extensie(s) die beter verwijderd kunnen worden"), en in de lijsten "niet up-to-date" en "niet automatisch vast te stellen" staat bij zo'n extensie "(niet actief)".
+- Een extensie telt als niet actief als al zijn onderdelen uitstaan, net als in de kolom "Actief" van het extensieoverzicht.
+
+### SP Page Builder twee keer in het extensieoverzicht (`versie_vergelijk_functies.php`)
+Naast het component (met bekende versie) stonden nog twee losse regels "SP PageBuilder" en "SP Page Builder" met status Onbekend. Twee oorzaken:
+
+- **Auteur met en zonder domeinnaam.** Het component heeft als auteur "JoomShaper", een deel van de plugins "JoomShaper.com". Onderdelen worden alleen samengevoegd bij dezelfde auteur. Een auteursveld dat alleen uit een domeinnaam bestaat, telt nu als dezelfde auteur als de naam zonder domein (ook met "www."). Een gewone naam met spaties blijft ongewijzigd.
+- **Plugin in de pluginmap van een ander product.** De integratieplugin van SP Page Builder voor SP Simple Portfolio staat in de map `spsimpleportfolio` en werd daardoor als apart product gezien. Bij het samenvoegen wordt nu ook het element van de onderdelen vergeleken (zelfde regels: dezelfde auteur en een gedeeld voorvoegsel van minstens 5 tekens).
+
 ## 1.41 - 2026-10-31
 
 ### AWStats-script ten onrechte als KRITIEK gemeld (`scan_template.php`)

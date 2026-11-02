@@ -92,6 +92,9 @@ usort($onbekendeItems, $sorteerOpRisico);
 $alleExtensies = haalDerdePartijExtensies($pdo, $id);
 $verouderdeExtensies = array_values(array_filter($alleExtensies, fn($e) => $e['status'] === false));
 $onbekendeExtensies  = array_values(array_filter($alleExtensies, fn($e) => $e['status'] === null));
+// Extensies die helemaal uitgeschakeld zijn (alle onderdelen niet actief). Doen niets voor de site, maar hun bestanden
+// staan er nog wel en zijn via een lek net zo goed aan te spreken - verwijderen is beter dan uitschakelen.
+$nietActieveExtensies = array_values(array_filter($alleExtensies, fn($e) => empty($e['enabled'])));
 
 $nieuwsteVersies = haalNieuwsteVersies($pdo);
 $joomlaHuidig = $site['joomla_versie'] ?? null;
@@ -120,7 +123,8 @@ $aantalRechtenBestanden    = count($bestandenRechten);
 $aantalRechtenMappen       = count($mappenRechten);
 $aantalOnbekend            = count($onbekendeItems);
 $aantalVerouderdeExtensies = count($verouderdeExtensies);
-$totaalProblemen = $aantalBedreigingen + $aantalRechtenBestanden + $aantalRechtenMappen + $aantalOnbekend + $aantalVerouderdeExtensies + ($joomlaStatus === false ? 1 : 0);
+$aantalNietActief          = count($nietActieveExtensies);
+$totaalProblemen = $aantalBedreigingen + $aantalRechtenBestanden + $aantalRechtenMappen + $aantalOnbekend + $aantalVerouderdeExtensies + $aantalNietActief + ($joomlaStatus === false ? 1 : 0);
 
 function h($tekst)
 {
@@ -317,6 +321,7 @@ $samenvattingRegels = [
     [$aantalRechtenMappen, 'map(pen) met afwijkende maprechten'],
     [$aantalOnbekend, 'onbekend(e) bestand(en)/map(pen) die een controle waard zijn'],
     [$aantalVerouderdeExtensies, 'extensie(s) die niet up-to-date zijn'],
+    [$aantalNietActief, 'niet-actieve extensie(s) die beter verwijderd kunnen worden'],
 ];
 foreach ($samenvattingRegels as [$aantal, $omschrijving]):
 ?>
@@ -431,13 +436,13 @@ function toonItems(array $items): void
 <?php toonItems($onbekendeItems); ?>
 <?php endif; ?>
 
-<?php if (!empty($verouderdeExtensies) || !empty($onbekendeExtensies)): ?>
+<?php if (!empty($verouderdeExtensies) || !empty($onbekendeExtensies) || !empty($nietActieveExtensies)): ?>
 <h2 style="color: #29628a;">Extensies</h2>
 <?php if (!empty($verouderdeExtensies)): ?>
 <div class="uitleg-alinea">De volgende extensies zijn niet up-to-date. Verouderde extensies zijn een veelvoorkomende ingang voor aanvallers - werk ze bij via de Joomla-beheerder ("Systeem" -&gt; "Bijwerken" -&gt; "Extensies").</div>
 <?php foreach ($verouderdeExtensies as $extensie): ?>
 <div class="extensie-regel">
-    <span class="extensie-naam"><?php echo h($extensie['naam']); ?></span>
+    <span class="extensie-naam"><?php echo h($extensie['naam']); ?><?php echo empty($extensie['enabled']) ? ' <em>(niet actief)</em>' : ''; ?></span>
     <span style="color: #c0392b;">huidig: <?php echo h($extensie['versie'] ?: 'onbekend'); ?> &rarr; nieuwste bekende versie: <?php echo h($extensie['nieuwste_versie'] ?: 'onbekend'); ?></span>
 </div>
 <?php endforeach; ?>
@@ -446,8 +451,17 @@ function toonItems(array $items): void
 <div class="uitleg-alinea" style="margin-top: 14px;">Van de volgende extensies kon niet automatisch worden vastgesteld of er een nieuwere versie is - controleer deze zelf handmatig.</div>
 <?php foreach ($onbekendeExtensies as $extensie): ?>
 <div class="extensie-regel">
-    <span class="extensie-naam"><?php echo h($extensie['naam']); ?></span>
+    <span class="extensie-naam"><?php echo h($extensie['naam']); ?><?php echo empty($extensie['enabled']) ? ' <em>(niet actief)</em>' : ''; ?></span>
     <span style="color: #888;">huidige versie: <?php echo h($extensie['versie'] ?: 'onbekend'); ?></span>
+</div>
+<?php endforeach; ?>
+<?php endif; ?>
+<?php if (!empty($nietActieveExtensies)): ?>
+<div class="uitleg-alinea" style="margin-top: 14px;">De volgende extensies zijn geïnstalleerd maar staan helemaal uit. Ze doen niets voor de website, maar hun bestanden staan er nog wel - en een lek in een uitgeschakelde extensie is vaak gewoon te misbruiken. Niet meer nodig? Verwijder ze dan via de Joomla-beheerder ("Systeem" -&gt; "Beheren" -&gt; "Extensies"), in plaats van ze alleen uit te schakelen.</div>
+<?php foreach ($nietActieveExtensies as $extensie): ?>
+<div class="extensie-regel">
+    <span class="extensie-naam"><?php echo h($extensie['naam']); ?></span>
+    <span style="color: #888;"><?php echo h($extensie['type']); ?>, versie <?php echo h($extensie['versie'] ?: 'onbekend'); ?></span>
 </div>
 <?php endforeach; ?>
 <?php endif; ?>

@@ -34,6 +34,7 @@ require_once 'config.php';
 require_once 'endpoint_beveiliging.php';
 require_once 'instellingen_functies.php';
 require_once 'feed_terugval_functies.php';
+require_once 'auto_migratie.php';
 
 // Alleen-status-modus (gebruikt door beveiliging.php bij "Herscan alleen deze website"): geeft
 // terug wanneer het meest recente scanresultaat van deze site BIJ DE MONITOR is aangekomen, zonder
@@ -330,21 +331,38 @@ $siteId = isset($_GET['site_id']) ? (int) $_GET['site_id'] : 0;
 $categorie = isset($_GET['categorie']) && $_GET['categorie'] === 'anderen' ? 'anderen' : (isset($_GET['categorie']) ? 'eigen' : null);
 
 if ($siteId > 0) {
-    $stmt = $pdo->prepare("SELECT domein, scan_bestandsnaam, url_subpad FROM sites WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, domein, scan_bestandsnaam, url_subpad FROM sites WHERE id = ?");
     $stmt->execute([$siteId]);
     $sites = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } elseif ($categorie !== null) {
-    $sql = "SELECT domein, scan_bestandsnaam, url_subpad FROM sites WHERE categorie = ?";
+    $sql = "SELECT id, domein, scan_bestandsnaam, url_subpad FROM sites WHERE categorie = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$categorie]);
     $sites = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } else {
-    $sql = "SELECT domein, scan_bestandsnaam, url_subpad FROM sites";
+    $sql = "SELECT id, domein, scan_bestandsnaam, url_subpad FROM sites";
     $resultaat = $pdo->query($sql);
     $sites = $resultaat->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $log = startScansParallel($sites);
+
+// Sinds 1.43: per site bewaren of het scanscript gestart kon worden. Voorheen stond een mislukte start (bv. HTTP 403)
+// alleen in deze uitvoer, die je alleen ziet bij een handmatige scan. De indexpagina toonde dan gewoon het vorige
+// scanresultaat (bv. "Schoon"), en ook de notificatiemail zweeg. Nu staat de reden bij de site tot een volgende start
+// wél lukt; "sinds" blijft bij herhaalde mislukkingen op de eerste keer staan.
+zorgVoorScanStartFoutKolommen($pdo);
+$zetFout = $pdo->prepare("UPDATE sites SET scan_start_fout = ?, scan_start_fout_sinds = COALESCE(scan_start_fout_sinds, NOW()) WHERE id = ?");
+$wisFout = $pdo->prepare("UPDATE sites SET scan_start_fout = NULL, scan_start_fout_sinds = NULL WHERE id = ?");
+foreach ($sites as $index => $site) {
+    $regel = $log[$index] ?? '';
+    $zonderDomein = substr($regel, strlen($site['domein']) + 2); // "<domein>: " eraf
+    if (strpos($zonderDomein, 'gestart (') === 0) {
+        $wisFout->execute([(int) $site['id']]);
+    } else {
+        $zetFout->execute([trim(str_replace('⚠️', '', $zonderDomein)), (int) $site['id']]);
+    }
+}
 
 echo implode("\n", $log);
 echo "\n\n" . date('Y-m-d H:i:s') . " - scanscript aangeroepen op " . count($sites) . " site(s).\n";

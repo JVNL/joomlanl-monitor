@@ -63,6 +63,21 @@ function zorgVoorPhpVersieKolom(PDO $pdo): void
 }
 
 /**
+ * Kolommen voor een mislukte scanstart (migratiestap 27, sinds 1.43): de reden waarom start_scan.php het scanscript
+ * op de site niet kon starten (bv. HTTP 403), en sinds wanneer. Ook los aangeroepen vanuit start_scan.php vóór het
+ * opslaan, om dezelfde reden als zorgVoorRootNegeerPatronenKolom() hierboven.
+ */
+function zorgVoorScanStartFoutKolommen(PDO $pdo): void
+{
+    if (!kolomBestaat($pdo, 'sites', 'scan_start_fout')) {
+        $pdo->exec("ALTER TABLE `sites` ADD COLUMN `scan_start_fout` TEXT NULL DEFAULT NULL");
+    }
+    if (!kolomBestaat($pdo, 'sites', 'scan_start_fout_sinds')) {
+        $pdo->exec("ALTER TABLE `sites` ADD COLUMN `scan_start_fout_sinds` DATETIME NULL DEFAULT NULL AFTER `scan_start_fout`");
+    }
+}
+
+/**
  * Genummerde migratiestappen. Elke stap krijgt de $pdo-verbinding mee, en
  * moet zelf idempotent zijn (mag geen fout geven als 'm per ongeluk twee
  * keer draait).
@@ -588,6 +603,15 @@ function haalMigraties(): array
         // ----------------------------------------------------------------
         26 => function (PDO $pdo) {
             zorgVoorPhpVersieKolom($pdo);
+        },
+
+        // ----------------------------------------------------------------
+        // Stap 27 (versie 1.43): mislukte scanstart per site bewaren, zodat
+        // die ook op de indexpagina en in de notificatiemail staat (niet
+        // alleen in de uitvoer van een handmatige scan).
+        // ----------------------------------------------------------------
+        27 => function (PDO $pdo) {
+            zorgVoorScanStartFoutKolommen($pdo);
         },
 
     ];

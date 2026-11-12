@@ -51,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sslAan         = isset($_POST['email_ssl_enabled']) ? '1' : '0';
         $beveiligingAan = isset($_POST['email_beveiliging_enabled']) ? '1' : '0';
         $alleenBijCron  = isset($_POST['email_alleen_bij_cron']) ? '1' : '0';
+        $anderenBeveiliging = isset($_POST['email_anderen_beveiliging']) ? '1' : '0';
 
         slaInstellingOp($pdo, 'email_afzendernaam', $afzenderNaam);
         slaInstellingOp($pdo, 'email_website_status_enabled', $websiteAan);
@@ -60,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         slaInstellingOp($pdo, 'email_ssl_enabled', $sslAan);
         slaInstellingOp($pdo, 'email_beveiliging_enabled', $beveiligingAan);
         slaInstellingOp($pdo, 'email_alleen_bij_cron', $alleenBijCron);
+        slaInstellingOp($pdo, 'email_anderen_beveiliging', $anderenBeveiliging);
 
         if ($naamVoorBestandGewijzigd) {
             $toonNaamWaarschuwing = true;
@@ -738,6 +740,14 @@ header .knop {
             <div class="optie-tekst">
                 <strong>Beveiliging</strong>
                 <div class="uitleg">Meldt het aantal verdachte (niet-vertrouwde) bestanden - als vertrouwd gemarkeerde items tellen niet mee.</div>
+            </div>
+        </div>
+
+        <div class="optie">
+            <input type="checkbox" id="email_anderen_beveiliging" name="email_anderen_beveiliging" value="1" <?php echo (($instellingen['email_anderen_beveiliging'] ?? '0') === '1') ? 'checked' : ''; ?>>
+            <div class="optie-tekst">
+                <strong>Ook websites van anderen (alleen beveiliging)</strong>
+                <div class="uitleg">Standaard telt alleen de categorie "eigen" mee. Met dit aan komen sites in de categorie "anderen" ook in de mail, maar alleen met beveiligingsmeldingen: verdachte bestanden, een onvolledige scan en een scan die niet gestart kon worden. Website-, Joomla-, extensie- en SSL-meldingen blijven voor deze sites buiten de mail. Werkt alleen als "Beveiliging" hierboven aanstaat.</div>
             </div>
         </div>
 

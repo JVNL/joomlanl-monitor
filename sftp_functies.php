@@ -156,14 +156,9 @@ function sftpZoekConfigurationPhp(SFTP $sftp, string $pad, int $diepte, int &$be
     // er ook een sibling-installatie "clabbers" naast staat)? Probeer die
     // dan EERST - anders zou een depth-first zoektocht zomaar de
     // configuration.php van de verkeerde, naastgelegen site-submap vinden.
-    if ($doelSubmap !== '') {
-        usort($submapNamen, function (string $a, string $b) use ($doelSubmap): int {
-            $aMatch = strtolower($a) === strtolower($doelSubmap) ? 0 : 1;
-            $bMatch = strtolower($b) === strtolower($doelSubmap) ? 0 : 1;
-
-            return $aMatch <=> $bMatch;
-        });
-    }
+    // Sinds 1.43 daarna de gangbare webrootmappen (public_html, httpdocs ...),
+    // pas dan de rest - zie sorteerSubmappenMetVoorrang() onderaan.
+    $submapNamen = sorteerSubmappenMetVoorrang($submapNamen, $doelSubmap);
 
     foreach ($submapNamen as $naam) {
         $subPad = rtrim($pad, '/') . '/' . $naam;
@@ -324,4 +319,36 @@ function sftpIsZelfdeDomein(string $naamA, string $naamB): bool
     };
 
     return $normaliseer($naamA) !== '' && $normaliseer($naamA) === $normaliseer($naamB);
+}
+
+/**
+ * Sinds 1.43: volgorde waarin de submappen van een map worden doorzocht. Eerst de submap die bij déze site hoort
+ * (zie $doelSubmap), dan de gangbare webrootmappen (public_html, httpdocs ...), en pas daarna de rest in de
+ * oorspronkelijke volgorde. Zonder die voorrang op de webroot werd een domeinmap in de volgorde van de maplijst
+ * doorzocht: stonden er vóór public_html mappen met veel submappen (statistieken, back-ups, kopieën van
+ * mediamappen), dan was het maximum aantal te bezoeken mappen al op voordat public_html aan de beurt kwam, en
+ * werd de configuration.php die daar gewoon stond nooit gezien. Staat hier (en niet in ftp_detecteer_pad2.php)
+ * omdat zowel de FTP- als de SFTP-zoektocht hem gebruikt; ftp_detecteer_pad2.php laadt dit bestand al.
+ *
+ * @param string[] $submappen
+ * @return string[]
+ */
+function sorteerSubmappenMetVoorrang(array $submappen, string $doelSubmap): array
+{
+    $webrootNamen = ['public_html', 'httpdocs', 'htdocs', 'www', 'web', 'public', 'html'];
+
+    $rang = function (string $naam) use ($doelSubmap, $webrootNamen): int {
+        $klein = strtolower($naam);
+        if ($doelSubmap !== '' && $klein === strtolower($doelSubmap)) {
+            return 0;
+        }
+        $positie = array_search($klein, $webrootNamen, true);
+
+        return $positie === false ? 100 : 1 + $positie;
+    };
+
+    // usort is stabiel sinds PHP 8.0: mappen met dezelfde rang houden hun oorspronkelijke volgorde.
+    usort($submappen, fn(string $a, string $b): int => $rang($a) <=> $rang($b));
+
+    return $submappen;
 }

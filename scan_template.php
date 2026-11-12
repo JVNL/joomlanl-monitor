@@ -453,6 +453,63 @@ function meldUitvoerbaarBuitenWebsite(string $pad, string $startMap, array &$bac
 }
 
 /**
+ * Sinds 1.43: heeft dit bestand of deze map de naam van een Linux-kernelproces? Malware (bots, miners, backdoors) geeft
+ * zichzelf zo'n naam, zodat het proces in ps/top tussen de echte kernelprocessen niet opvalt - bij voorkeur tussen
+ * haakjes, zoals de kernel zijn eigen processen toont. Aanleiding (november 2026): /home/<account>/[rcu_bh], 2,7 MB,
+ * rechten 000 en immutable, in de homemap van een account bij een gedeelde hostingpartij. Herkend:
+ *  - elke naam die helemaal tussen vierkante haken staat ("[rcu_bh]", "[kworker0:1]", "[kthreadd]");
+ *  - de namen van bekende kernelprocessen zonder haken ("kworker", "kthreadd", "ksoftirqd0", "rcu_sched" ...).
+ * Alleen buiten de website gemeld: daar zet niemand bestanden met zo'n naam neer.
+ */
+function isKernelprocesNaam(string $naam): bool
+{
+    if (preg_match('/^\[[A-Za-z0-9_:.\-]{2,40}\]$/', $naam)) {
+        return true;
+    }
+    return (bool) preg_match('/^(kworker|kthreadd|ksoftirqd|kswapd|kdevtmpfs|khugepaged|kintegrityd|kblockd|kauditd|ksmd|'
+        . 'rcu_(sched|bh|preempt|gp|par_gp)|watchdogd|migration)[0-9_:.\-]*$/i', $naam);
+}
+
+/**
+ * Sinds 1.43: meldt een bestand of map buiten de website met de naam van een kernelproces (zie isKernelprocesNaam()) als
+ * KRITIEK, ongeacht rechten of inhoud - het aangetroffen exemplaar had rechten 000 en was niet leesbaar. Geeft true terug
+ * als er gemeld is, zodat de aanroeper geen tweede melding "afwijkende rechten" maakt.
+ */
+function meldKernelprocesNaamBuitenWebsite(string $pad, string $startMap, array &$backdoorVondsten): bool
+{
+    if (strpos($pad, rtrim($startMap, '/') . '/') === 0 || !isKernelprocesNaam(basename($pad))) {
+        return false;
+    }
+    $isMap = @is_dir($pad);
+    $rechten = @fileperms($pad);
+    $details = [];
+    if ($rechten !== false) {
+        $details[] = 'rechten ' . substr(sprintf('%o', $rechten), -3);
+    }
+    if (!$isMap) {
+        $details[] = (int) @filesize($pad) . ' bytes';
+        if (!@is_readable($pad)) {
+            $details[] = 'niet leesbaar';
+        } elseif (isElfBestand($pad)) {
+            $details[] = 'ELF-programma';
+        }
+    }
+    $backdoorVondsten[] = [
+        'naam' => $pad,
+        'reden' => 'KRITIEK - ' . ($isMap ? 'map' : 'bestand') . ' met de naam van een Linux-kernelproces ("' . basename($pad) . '"'
+            . (empty($details) ? '' : ', ' . implode(', ', $details)) . ') buiten de website. Malware geeft zichzelf zo\'n naam '
+            . 'om in de proceslijst niet op te vallen; de hostingpartij en Joomla zetten zoiets nooit in een account. Kan het '
+            . 'bestand niet gewijzigd of verwijderd worden (immutable), dan kan alleen de hostingpartij dat. Controleer crontab '
+            . 'en .bashrc/.bash_profile/.profile, en laat de hostingpartij nagaan of er een proces met deze naam draait',
+        'risico' => 95,
+        'bestandspad' => $pad,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+        'grootte' => $isMap ? 0 : (int) @filesize($pad),
+    ];
+    return true;
+}
+
+/**
  * Meldt een gsocket-signatuur in een (niet-uitvoerbaar, niet-PHP) bestand. Geeft true terug als er gemeld is.
  */
 function meldGsocketSignatuur(string $pad, string $startMap, array &$backdoorVondsten): bool
@@ -4704,6 +4761,11 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         // voor hetzelfde bestand. Ook binnen .cagefs/.cl.selector: daar zet een aanvaller juist graag iets neer; de
         // systeembestanden van CloudLinux zelf (van root, niet beschrijfbaar) vallen af in uitvoerbaarBuitenWebsite().
         $uitvoerbaarGemeld = !@is_dir($volledigPad) && meldUitvoerbaarBuitenWebsite($volledigPad, $startMap, $backdoorVondsten);
+        // Sinds 1.43: naam van een kernelproces buiten de website (bv. "[rcu_bh]") - ook bij rechten 000 of onleesbaar.
+        // Is het al als uitvoerbaar bestand gemeld, dan komt er een tweede reden bij dezelfde vondst (samengevoegd).
+        if (meldKernelprocesNaamBuitenWebsite($volledigPad, $startMap, $backdoorVondsten)) {
+            $uitvoerbaarGemeld = true;
+        }
 
         if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector && !$uitvoerbaarGemeld
             && !isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
@@ -5268,7 +5330,8 @@ function checkExtraScanpadTopNiveau($extraRoot, &$rootUnknown, array $negeren, $
 
         // Uitvoerbaar bestand: wordt door scanRecursief() al als KRITIEK gemeld (zie uitvoerbaarBuitenWebsite()), dus
         // hier geen melding "afwijkende rechten" - die zou daar bij het samenvoegen weer in terechtkomen.
-        $rechtenAfwijking = (!$isMap && uitvoerbaarBuitenWebsite($volledigPad, $startMap) !== null)
+        // Sinds 1.43 ook niet bij de naam van een kernelproces: die wordt door scanRecursief() als KRITIEK gemeld.
+        $rechtenAfwijking = ((!$isMap && uitvoerbaarBuitenWebsite($volledigPad, $startMap) !== null) || isKernelprocesNaam($item))
             ? null : controleerBestandsrechten($volledigPad, $isMap);
         if ($rechtenAfwijking !== null) {
             $rootUnknown[] = $rechtenAfwijking;

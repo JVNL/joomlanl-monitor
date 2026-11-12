@@ -809,11 +809,19 @@ th {
     </div>
 
     <h3>Afwijkende extensiebestanden (vergeleken met andere sites)</h3>
-    <p>Onderaan het beveiligingsrapport verschijnt, als er iets gevonden is, een aparte sectie die extensiebestanden tussen al je gemonitorde sites onderling vergelijkt. Heeft een site dezelfde extensie + hetzelfde versienummer als andere sites, maar wijkt een bestand daarbinnen af van wat bij de meerderheid van die andere sites is aangetroffen? Dan is dat een signaal dat het bestand op déze site mogelijk is aangepast (bijv. door een backdoor) - zonder dat daar externe downloads voor nodig zijn.</p>
+    <p>Kolom <strong>Bestandsafwijkingen</strong> op de indexpagina, en onderaan het beveiligingsrapport. Het idee: staat dezelfde extensie in <em>precies dezelfde versie</em> op meerdere van je sites, dan horen de bestanden daarvan overal identiek te zijn. De monitor vergelijkt ze per bestand en kijkt wat de meeste sites hebben. Wijkt een site daarvan af, dan wordt dat bestand daar gemeld.</p>
     <div class="tip">
-        💡 Dit is een signaal, geen bewijs - het kan ook een bewuste, onschuldige aanpassing zijn die je zelf ooit hebt
-        gedaan. Controleer het genoemde bestand handmatig via FTP om zeker te zijn. Hoe meer sites dezelfde extensie
-        hebben, hoe betrouwbaarder de vergelijking.
+        💡 Voorbeeld: JCE 2.9.80 staat op 5 sites. Op 4 sites is <code>editor.php</code> exact gelijk, op de vijfde niet.
+        Dan meldt de monitor <code>editor.php</code> bij die vijfde site: daar is het bestand aangepast - door een update
+        die mislukte, door iemand zelf, of door een aanvaller.
+    </div>
+    <p>Dit is een signaal, geen bewijs, en het is zwakker dan de kolom Beveiliging: er wordt niet vergeleken met het origineel van de maker, alleen met wat je andere sites hebben. Vandaar een eigen kolom, met een oranje ⚠️ in plaats van rood. Hoe het te lezen:</p>
+    <div class="stap"><strong>Veel bestanden van één extensie tegelijk</strong> (een samengevoegde rij, bijv. "73 bestanden wijken op dezelfde manier af") - bijna altijd een andere editie of build met hetzelfde versienummer (Pro tegenover Core, een hotfix zonder nieuw nummer). Onschuldig: met "Vertrouw alle N" weg te zetten.</div>
+    <div class="stap"><strong>Eén los bestand</strong> - dit is het geval om naar te kijken. Open het bestand en kijk of er code in staat die er niet hoort (eval, base64, een include van iets vreemds).</div>
+    <div class="tip">
+        💡 Staat een extensie maar op één site, of heeft elke site een andere versie, dan is er niets om mee te
+        vergelijken en wordt er ook niets gemeld. Hoe meer sites dezelfde extensie en versie hebben, hoe
+        betrouwbaarder de vergelijking. Bij twee sites die van elkaar verschillen is niet te zeggen welke de goede is.
     </div>
     <p><em>Joomla's eigen kernbestanden</em> zitten bewust niet in deze vergelijking - die hebben een eigen, preciezere vergelijking tegen het officiële Joomla-pakket, zie de sectie hieronder.</p>
     <p><strong>Samengevoegde rijen bij dezelfde afwijking op veel bestanden tegelijk</strong> - wijken van één extensie+versie meerdere bestanden tegelijk op precies dezelfde manier af (dezelfde andere site(s) hebben steeds exact dezelfde inhoud als deze site)? Dan worden die samengevoegd tot één rij, bijv. "73 bestanden wijken op dezelfde manier af", in plaats van 73 losse regels. Dat wijst meestal op een andere sub-versie/build van diezelfde extensie (bijv. een Pro- versus Core-editie, of een tussentijdse hotfix zonder eigen versienummer) - géén losse verdachte bestanden. Zo'n rij staat, zolang hij nog niet is beoordeeld, standaard al opengeklapt; is hij eenmaal vertrouwd, dan klapt hij (in de aparte "vertrouwd"-sectie) weer dicht.</p>

@@ -1,5 +1,42 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.43 - 2026-11-10
+
+### Scan niet gestart: ook zichtbaar buiten de handmatige scan (`start_scan.php`, `index.php`, `verstuur_notificatie_email.php`, `auto_migratie.php`)
+Kon het scanscript op een site niet gestart worden (bv. HTTP 403, een serverfout of een verouderd antwoord uit een cache), dan stond dat alleen in de uitvoer van een handmatige scan. Na een cronscan, of bij een blik op het overzicht, zag je gewoon het vorige resultaat (bv. "Schoon") en zweeg de notificatiemail.
+
+- De reden wordt nu per site bewaard (nieuwe kolommen `scan_start_fout` en `scan_start_fout_sinds`, migratiestap 27), met de datum van de eerste mislukte poging. Bij de eerstvolgende geslaagde start verdwijnt hij weer.
+- Indexpagina: bovenaan de kolom Beveiliging een rode regel "⛔ Scan niet gestart (HTTP 403) sinds ...". De volledige melding en de datum van de laatste geslaagde scan staan in de tooltip. Telt mee als "Aandacht nodig - beveiliging" en in de sortering.
+- Notificatiemail (als Beveiliging aanstaat): regel "Scan kon niet gestart worden (HTTP 403) sinds ..., resultaat is van een eerdere scan".
+
+### Websites van anderen in de notificatiemail, alleen beveiliging (`configuratie.php`, `verstuur_notificatie_email.php`)
+Nieuwe e-mailinstelling "Ook websites van anderen (alleen beveiliging)". Standaard uit; dan telt, zoals voorheen, alleen de categorie "eigen" mee. Aan (en Beveiliging aan) komen sites in de categorie "anderen" ook in de mail, maar alleen met verdachte bestanden, een onvolledige scan en een scan die niet gestart kon worden. Website-, Joomla-, extensie- en SSL-meldingen blijven voor die sites buiten de mail. In de mail staan ze onder de eigen sites, met "(anderen)" achter de naam.
+
+### "Zoek automatisch" vond configuration.php niet in public_html (`ftp_detecteer_pad2.php`, `sftp_functies.php`)
+De zoekfunctie doorzocht de submappen van de domeinmap in de volgorde van de maplijst, en ging bij elke map eerst helemaal de diepte in. Stonden er vóór public_html mappen met honderden submappen, dan was de limiet van 600 te bezoeken mappen al bereikt voordat public_html aan de beurt kwam. Daarna vulde de noodoplossing uit 1.37 de webroot in, met de onterechte waarschuwing dat de site geen Joomla meer zou zijn.
+
+- Zoekvolgorde: eerst de submap van de site (bij "domein/submap"), dan de gangbare webrootmappen (public_html, httpdocs, htdocs, www, web, public, html), pas daarna de rest in de oorspronkelijke volgorde. Geldt voor FTP, FTPS en SFTP (één gedeelde functie, `sorteerSubmappenMetVoorrang()`).
+- De waarschuwing "lijkt geen Joomla (meer) te zijn" verschijnt alleen nog als er in de gevonden webroot echt geen configuration.php staat.
+
+### Rechtstreeks naar de updatepagina van de site (`index.php`, `verstuur_notificatie_email.php`, `instellingen_functies.php`)
+Na een check is updaten de handeling die je het vaakst doet. Waar een update gemeld wordt, staat nu een link die meteen het juiste scherm in de backend van de site opent, in plaats van eerst het dashboard:
+
+- Kolom Extensies, bij "Niet up-to-date": "→ updates" naar `option=com_installer&view=update`.
+- Kolom Joomla, bij een nieuwere versie: "→ bijwerken" naar `option=com_joomlaupdate`.
+- In de notificatiemail staan dezelfde links achter de regels voor Joomla en extensies.
+- De link gaat uit van het ingestelde admin-pad. Staat daar al een query in (bv. een geheime sleutel achter de ?), dan komen de parameters er met & achter.
+- De domeinnaam blijft gewoon naar de backend linken.
+
+### Bestanden met de naam van een kernelproces buiten de website (`scan_template.php`)
+In de homemap van een account stond een bestand `[rcu_bh]` (2,7 MB, rechten 000, niet te wijzigen of te verwijderen). Het werd alleen gemeld als "onbekend item in extra scanpad" (MIDDEL · 50) en "afwijkende rechten" (LAAG · 25). Malware geeft zichzelf de naam van een Linux-kernelproces, zodat het in de proceslijst niet opvalt.
+
+- Nieuw: een bestand of map buiten de website met zo'n naam wordt gemeld als KRITIEK (ZEER HOOG · 95), ongeacht rechten of inhoud. Herkend: elke naam die helemaal tussen vierkante haken staat (`[rcu_bh]`, `[kthreadd]`), en de namen van bekende kernelprocessen zonder haken (`kworker`, `ksoftirqd`, `rcu_sched` ...).
+- In de melding staan rechten, grootte, en of het bestand leesbaar of een Linux-programma is. Geen aparte melding "afwijkende rechten" meer voor hetzelfde bestand.
+- Binnen de website wordt hier niet op gelet.
+
+### Uitleg bij afwijkende extensiebestanden (`help.php`)
+De helptekst bij "Afwijkende extensiebestanden (vergeleken met andere sites)" begint nu met een eenvoudige uitleg en een voorbeeld, en zegt hoe je een melding leest: veel bestanden van één extensie tegelijk is meestal een andere editie of build, één los bestand is het geval om te bekijken.
+
 ## 1.42 - 2026-11-01
 
 ### Ruwe scanuitvoer begint met de site (`scan_template.php`)

@@ -230,6 +230,7 @@ td {
 .groen { color: var(--thema-groen); font-weight: bold; }
 .oranje { color: orange; font-weight: bold; }
 .rood { color: red; font-weight: bold; }
+.update-link { font-size: 0.85em; white-space: nowrap; }
 .grijs { color: #888; font-weight: bold; }
 .vertrouwd-link { color: var(--thema-link); font-weight: bold; text-decoration: underline; }
 
@@ -921,7 +922,8 @@ foreach ($sites as $siteVoorTelling) {
     // pakket, dus een hard signaal, net als de reguliere verdachte-scan.
     $issueBeveiliging = (count($itemsVoorTelling) - $vertrouwdAantalVoorTelling) > 0
         || (int) ($kernAfwijkingenPerSite[$siteVoorTelling['id']] ?? 0) > 0
-        || $scanOnvolledigVoorTelling;
+        || $scanOnvolledigVoorTelling
+        || !empty($siteVoorTelling['scan_start_fout']);
 
     // Extensiebestand-afwijkingen (vergeleken met de MEERDERHEID van andere
     // sites) zijn een zachter "wijkt af"-signaal - geen vergelijking met een
@@ -1036,8 +1038,25 @@ foreach ($sites as $site) {
     $ernstBestanden = -1;
     $siteId = (int)$site['id'];
 
+    // Sinds 1.43: kon het scanscript bij de laatste poging niet gestart worden (bv. HTTP 403), dan bovenaan de
+    // Beveiliging-kolom een rode regel. Wat eronder staat (bv. "Schoon") is dan het resultaat van een eerdere scan.
+    $scanStartFoutRegel = '';
+    if (!empty($site['scan_start_fout'])) {
+        $sinds = !empty($site['scan_start_fout_sinds']) ? date('d-m-Y H:i', strtotime($site['scan_start_fout_sinds'])) : '';
+        $kort = preg_match('/\(HTTP (\d+)\)/', $site['scan_start_fout'], $m) ? "HTTP {$m[1]}" : 'fout';
+        $titel = $site['scan_start_fout']
+            . ($sinds !== '' ? " (sinds $sinds)" : '')
+            . (!empty($site['verdacht_laatste_scan']) ? ' - het resultaat hieronder is van de scan van '
+                . date('d-m-Y H:i', strtotime($site['verdacht_laatste_scan'])) . '.' : '');
+        $scanStartFoutRegel = "<span class='rood' title='" . htmlspecialchars($titel, ENT_QUOTES) . "'>⛔ Scan niet gestart ($kort)"
+            . ($sinds !== '' ? " sinds " . htmlspecialchars($sinds) : '') . "</span>";
+    }
+
     if ($site['verdacht_aantal'] === null) {
-        $beveiliging = "<td data-label=\"Beveiliging\">Nog niet gescand</td>";
+        $beveiliging = "<td data-label=\"Beveiliging\">" . ($scanStartFoutRegel !== '' ? $scanStartFoutRegel . '<br>' : '') . "Nog niet gescand</td>";
+        if ($scanStartFoutRegel !== '') {
+            $ernstBeveiliging = 1;
+        }
         $bestandenCel = "<td data-label=\"Bestandsafwijkingen\">-</td>";
     } else {
         $items = parseVerdachtDetails($site['verdacht_details'] ?? '');
@@ -1062,7 +1081,7 @@ foreach ($sites as $site) {
         // vergelijking met het officiële, ongewijzigde Joomla-pakket, dus
         // een hard signaal, net als de reguliere verdachte-bestanden-scan.
         $kernAantal = (int) ($kernAfwijkingenPerSite[$site['id']] ?? 0);
-        $ernstBeveiliging = $verdachtWeergave + $kernAantal + ($scanVoortgang !== null ? 1 : 0);
+        $ernstBeveiliging = $verdachtWeergave + $kernAantal + ($scanVoortgang !== null ? 1 : 0) + ($scanStartFoutRegel !== '' ? 1 : 0);
 
         // Extensie-bestand-afwijkingen (vergeleken met de MEERDERHEID van
         // andere sites, dus geen vergelijking met een officieel pakket)
@@ -1076,6 +1095,9 @@ foreach ($sites as $site) {
         $ernstBestanden = $bestandAantal;
 
         $regels = [];
+        if ($scanStartFoutRegel !== '') {
+            $regels[] = $scanStartFoutRegel;
+        }
 
         // Onvolledige scan: bovenaan, in plaats van "1 verdacht" (wat het niet is) en in plaats van "Schoon" (dat is
         // nog niet vastgesteld zolang niet alles is bekeken). De link opent het rapport en zet daar meteen een
@@ -1154,6 +1176,9 @@ foreach ($sites as $site) {
         $joomlaCel = htmlspecialchars($joomlaHuidig) . " <span class='groen'>✅</span>";
     } else {
         $joomlaCel = "<span class='rood'>🔴 " . htmlspecialchars($joomlaHuidig) . "</span><br>(nieuw: " . htmlspecialchars($joomlaNieuwsteBinnenMajor) . ")";
+        // Sinds 1.43: rechtstreeks naar Joomla bijwerken in de backend van de site.
+        $joomlaCel .= "<br><a class='update-link' href='" . htmlspecialchars(bepaalAdminActieUrl($site, 'option=com_joomlaupdate'), ENT_QUOTES)
+            . "' target='_blank' title='Joomla bijwerken in de backend van de site'>→ bijwerken</a>";
     }
 
     // Sorteerbouwstenen voor de Joomla-kolom - BEWUST geen enkel "ernst"-getal
@@ -1221,6 +1246,9 @@ foreach ($sites as $site) {
         $ernstExtensies = 1;
     } elseif ($heeftVerouderdeItems) {
         $extensiesCel = "<a class='rood' href='extensies.php?id=" . (int)$site['id'] . "'>Niet up-to-date</a>";
+        // Sinds 1.43: rechtstreeks naar de updatepagina in de backend van de site (scheelt een paar kliks).
+        $extensiesCel .= " <a class='update-link' href='" . htmlspecialchars(bepaalAdminActieUrl($site, 'option=com_installer&view=update'), ENT_QUOTES)
+            . "' target='_blank' title='Updatepagina in de backend van de site'>→ updates</a>";
         $ernstExtensies = 300 + ($derdePartij['niet_up_to_date'] * 10) + $derdePartij['onbekend'];
     } elseif ($heeftOnbekendeItems) {
         // Geen bevestigd-verouderde items, maar ook niet ALLES bevestigd

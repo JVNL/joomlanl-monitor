@@ -259,6 +259,23 @@ function ontoegankelijkeDoelsubmapPaden(?string $nieuwPad = null): array
     return $paden;
 }
 
+/**
+ * Sinds 1.43: staat er een (gewoon) bestand configuration.php in deze maplijst? Gebruikt door fase 1c, zodat
+ * de waarschuwing "lijkt geen Joomla (meer) te zijn" alleen verschijnt als dat ook echt zo is.
+ *
+ * @param array<string, bool>|null $inhoud [naam => isMap], zie bepaalWebrootInDomeinmap()
+ */
+function bevatConfigurationPhp(?array $inhoud): bool
+{
+    foreach (($inhoud ?? []) as $naam => $isMap) {
+        if (!$isMap && strtolower((string) $naam) === 'configuration.php') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function zoekConfigurationPhp($conn, string $pad, int $diepte, int &$bezochteMappen, string $doelDomein, string $doelSubmap, string $host, int $poort, string $gebruiker, string $wachtwoord, bool $ssl, int $maxDiepte = 7, int $maxBezochteMappen = 600, bool $doelSubmapAlBereikt = false): ?string
 {
     if ($diepte > $maxDiepte || $bezochteMappen > $maxBezochteMappen) {
@@ -352,14 +369,7 @@ function zoekConfigurationPhp($conn, string $pad, int $diepte, int &$bezochteMap
         return $pad;
     }
 
-    if ($doelSubmap !== '') {
-        usort($submappen, function (string $a, string $b) use ($doelSubmap): int {
-            $aMatch = strtolower($a) === strtolower($doelSubmap) ? 0 : 1;
-            $bMatch = strtolower($b) === strtolower($doelSubmap) ? 0 : 1;
-
-            return $aMatch <=> $bMatch;
-        });
-    }
+    $submappen = sorteerSubmappenMetVoorrang($submappen, $doelSubmap);
 
     foreach ($submappen as $naam) {
         if ($heeftOnverkendeDoelsubmap && strtolower($naam) === strtolower($doelSubmap)) {
@@ -671,7 +681,7 @@ if ($protocol === 'sftp') {
         // Fase 1c (sinds 1.37): domeinmap gevonden, maar geen configuration.php - zie bepaalWebrootInDomeinmap().
         // In dat geval NIET terugvallen op de brede zoektocht hieronder (die vond een ander domein).
         if ($gevondenPad === null && $domeinMapPad !== null) {
-            $gevondenPad = bepaalWebrootInDomeinmap(function (string $pad) use ($sftp): ?array {
+            $sftpLijst = function (string $pad) use ($sftp): ?array {
                 $lijst = $sftp->rawlist($pad);
                 if ($lijst === false) {
                     return null;
@@ -683,9 +693,13 @@ if ($protocol === 'sftp') {
                     }
                 }
                 return $uit;
-            }, $domeinMapPad, $doelSubmap);
+            };
+            $gevondenPad = bepaalWebrootInDomeinmap($sftpLijst, $domeinMapPad, $doelSubmap);
             if ($gevondenPad !== null) {
-                $sftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+                // Sinds 1.43: alleen waarschuwen als er in de gevonden webroot ook echt geen configuration.php staat.
+                if (!bevatConfigurationPhp($sftpLijst($gevondenPad))) {
+                    $sftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+                }
             } else {
                 echo json_encode(['succes' => false, 'foutmelding' => 'De map van dit domein is gevonden ("' . trim(ltrim($domeinMapPad, '.'), '/')
                     . '"), maar daarin staat geen configuration.php en geen herkenbare webroot. Vul het pad handmatig in.']);
@@ -780,7 +794,7 @@ if ($doelDomein !== '') {
 // Fase 1c (sinds 1.37): domeinmap gevonden, maar geen configuration.php - zie bepaalWebrootInDomeinmap(). In dat
 // geval NIET terugvallen op fase 1b/2 hieronder: die vonden de configuration.php van een ander domein op hetzelfde account.
 if ($gevondenPad === null && $domeinMapPad !== null) {
-    $gevondenPad = bepaalWebrootInDomeinmap(function (string $pad) use ($conn, $host, $poort, $gebruiker, $wachtwoord, $ssl): ?array {
+    $ftpLijst = function (string $pad) use ($conn, $host, $poort, $gebruiker, $wachtwoord, $ssl): ?array {
         $rawlist = haalMaplijstMetTerugval($conn, $pad, $host, $poort, $gebruiker, $wachtwoord, $ssl);
         if ($rawlist === false) {
             return null;
@@ -794,9 +808,13 @@ if ($gevondenPad === null && $domeinMapPad !== null) {
             }
         }
         return $uit;
-    }, $domeinMapPad, $doelSubmap);
+    };
+    $gevondenPad = bepaalWebrootInDomeinmap($ftpLijst, $domeinMapPad, $doelSubmap);
     if ($gevondenPad !== null) {
-        $ftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+        // Sinds 1.43: alleen waarschuwen als er in de gevonden webroot ook echt geen configuration.php staat.
+        if (!bevatConfigurationPhp($ftpLijst($gevondenPad))) {
+            $ftpWaarschuwing = geenJoomlaWebrootWaarschuwing($domeinMapPad);
+        }
     } else {
         ftp_close($conn);
         echo json_encode(['succes' => false, 'foutmelding' => 'De map van dit domein is gevonden ("' . trim(ltrim($domeinMapPad, '.'), '/')

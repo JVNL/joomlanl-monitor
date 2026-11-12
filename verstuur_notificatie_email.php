@@ -52,7 +52,16 @@ if (!$websiteAan && !$joomlaAan && !$extensiesAan && !$sslAan && !$beveiligingAa
 // bedoeld om te laten zien welke EIGEN sites aandacht nodig hebben, en
 // zou anders onnodig rommelig worden door sites die je expliciet niet
 // per se up-to-date/schoon hoeft te houden.
-$sites = $pdo->query("SELECT * FROM sites WHERE categorie = 'eigen' ORDER BY domein ASC")->fetchAll(PDO::FETCH_ASSOC);
+//
+// Sinds 1.43 kunnen sites van anderen er optioneel bij, maar dan alleen met
+// beveiligingsmeldingen (instelling "email_anderen_beveiliging"): bij sites
+// die je opschoont of in de gaten houdt wil je wél weten als er iets
+// verdachts opduikt of de scan niet meer start, maar updates/SSL zijn daar
+// niet jouw zaak.
+$anderenBeveiliging = $beveiligingAan && instellingIsAan($instellingen['email_anderen_beveiliging'] ?? '0');
+$sites = $pdo->query("SELECT * FROM sites WHERE categorie = 'eigen'"
+    . ($anderenBeveiliging ? " OR categorie = 'anderen'" : '')
+    . " ORDER BY categorie = 'anderen', domein ASC")->fetchAll(PDO::FETCH_ASSOC);
 
 $catalogus                   = haalExtensieCatalogus($pdo);
 $nieuwsteVersies              = haalNieuwsteVersies($pdo);
@@ -64,9 +73,10 @@ $meldingenPerSite = [];
 
 foreach ($sites as $site) {
     $regels = [];
+    $isEigen = ($site['categorie'] ?? 'eigen') !== 'anderen';
 
     // 1. Website status (online/offline)
-    if ($websiteAan) {
+    if ($websiteAan && $isEigen) {
         $class  = $site['live_website_class'] ?? '';
         $status = $site['live_website_status'] ?? '';
 
@@ -85,18 +95,18 @@ foreach ($sites as $site) {
     }
 
     // 2. Joomla-versie
-    if ($joomlaAan) {
+    if ($joomlaAan && $isEigen) {
         $huidig   = $site['joomla_versie'] ?? null;
         $major    = bepaalMajorVersie($huidig);
         $nieuwste = $major !== null ? ($nieuwsteVersies['joomla_' . $major] ?? null) : null;
 
         if (isUpToDate($huidig, $nieuwste) === false) {
-            $regels[] = "Joomla: $huidig → nieuwste $nieuwste beschikbaar";
+            $regels[] = ["Joomla: $huidig → nieuwste $nieuwste beschikbaar", bepaalAdminActieUrl($site, 'option=com_joomlaupdate'), 'bijwerken'];
         }
     }
 
     // 3. Extensies (catalogus + volledige derde-partij-lijst samen)
-    if ($extensiesAan) {
+    if ($extensiesAan && $isEigen) {
         $geinstalleerd = $alleGeinstalleerdeExtensies[$site['id']] ?? [];
         $statussen     = bepaalExtensieStatussen($geinstalleerd, $catalogus, $nieuwsteVersies);
         $catalogusNietUpToDate = count($statussen['niet_up_to_date']);
@@ -106,12 +116,12 @@ foreach ($sites as $site) {
         $totaalNietUpToDate = $catalogusNietUpToDate + $derdePartij['niet_up_to_date'];
 
         if ($totaalNietUpToDate > 0) {
-            $regels[] = "Extensies - Niet up-to-date: $totaalNietUpToDate";
+            $regels[] = ["Extensies - Niet up-to-date: $totaalNietUpToDate", bepaalAdminActieUrl($site, 'option=com_installer&view=update'), 'updates'];
         }
     }
 
     // 4. SSL-status (alleen verlopen certificaten)
-    if ($sslAan) {
+    if ($sslAan && $isEigen) {
         if (($site['live_ssl_class'] ?? '') === 'ssl-rood') {
             $regels[] = "SSL: certificaat verlopen";
         }
@@ -136,6 +146,12 @@ foreach ($sites as $site) {
         }
         if ($scanVoortgang !== null) {
             $regels[] = "Beveiliging - " . scanVoortgangTekst($scanVoortgang) . " (niet alle bestanden gecontroleerd)";
+        }
+        // Sinds 1.43: scanscript kon niet gestart worden - het beveiligingsresultaat hierboven is dan niet vers.
+        if (!empty($site['scan_start_fout'])) {
+            $kort = preg_match('/\(HTTP (\d+)\)/', $site['scan_start_fout'], $m) ? "HTTP {$m[1]}" : 'fout';
+            $sinds = !empty($site['scan_start_fout_sinds']) ? ' sinds ' . date('d-m-Y H:i', strtotime($site['scan_start_fout_sinds'])) : '';
+            $regels[] = "Beveiliging - Scan kon niet gestart worden ($kort)$sinds, resultaat is van een eerdere scan";
         }
     }
 
@@ -190,7 +206,14 @@ foreach ($meldingenPerSite as $domein => $regels) {
 
     $puntenHtml = '';
     foreach ($regels as $regel) {
-        $puntenHtml .= '<li style="margin: 0 0 4px 0; color: #333333;">' . htmlspecialchars($regel) . '</li>';
+        // Sinds 1.43 kan een regel een link naar de backend van de site hebben: [tekst, url, linktekst].
+        if (is_array($regel)) {
+            [$tekst, $url, $linkTekst] = $regel;
+            $puntenHtml .= '<li style="margin: 0 0 4px 0; color: #333333;">' . htmlspecialchars($tekst)
+                . ' - <a href="' . htmlspecialchars($url) . '" style="color: #1f6fa8;">' . htmlspecialchars($linkTekst) . '</a></li>';
+        } else {
+            $puntenHtml .= '<li style="margin: 0 0 4px 0; color: #333333;">' . htmlspecialchars($regel) . '</li>';
+        }
     }
 
     $regelsHtml .= '
@@ -204,7 +227,7 @@ foreach ($meldingenPerSite as $domein => $regels) {
                         </a>
                     </td>
                     <td style="vertical-align: middle;">
-                        <a href="' . htmlspecialchars($adminUrl) . '" style="color: #1f6fa8; font-weight: bold; font-size: 15px; text-decoration: none;">' . htmlspecialchars($domein) . '</a>
+                        <a href="' . htmlspecialchars($adminUrl) . '" style="color: #1f6fa8; font-weight: bold; font-size: 15px; text-decoration: none;">' . htmlspecialchars($domein) . '</a>' . ((($site['categorie'] ?? 'eigen') === 'anderen') ? ' <span style="color: #888888; font-size: 12px;">(anderen)</span>' : '') . '
                     </td>
                 </tr>
             </table>

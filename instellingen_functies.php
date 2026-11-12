@@ -344,6 +344,31 @@ function bepaalSiteUrl(array $site, string $pad = ''): string
 }
 
 /**
+ * Sinds 1.43: URL naar een scherm in de backend van de site, bv. de updatepagina
+ * ("option=com_installer&view=update") of Joomla bijwerken ("option=com_joomlaupdate").
+ * Gaat uit van het (versleutelde) admin_pad van de site, met "administrator" als terugval.
+ * Staat er in het admin-pad al een query (bv. een geheime sleutel: "administrator/?sleutel"),
+ * dan komt de parameter er met & achter, zodat die sleutel blijft werken.
+ */
+function bepaalAdminActieUrl(array $site, string $query): string
+{
+    $adminPad = trim(ontsleutelWaarde($site['admin_pad'] ?? ''), '/');
+    if ($adminPad === '') {
+        $adminPad = 'administrator';
+    }
+
+    if (strpos($adminPad, '?') !== false) {
+        $pad = $adminPad . '&' . $query;
+    } elseif (preg_match('/\.php$/i', $adminPad)) {
+        $pad = $adminPad . '?' . $query;
+    } else {
+        $pad = $adminPad . '/index.php?' . $query;
+    }
+
+    return bepaalSiteUrl($site, $pad);
+}
+
+/**
  * URL van het scanscript voor een GET-aanroep (een scan starten, of het scanscript rechtstreeks openen),
  * met een unieke "ververs-code" erachter (?nc=...). Twee redenen:
  *  - een URL die elke keer anders is, wordt niet uit een cache van de browser, een CDN (Cloudflare) of de

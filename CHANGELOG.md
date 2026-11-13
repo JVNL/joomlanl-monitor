@@ -1,5 +1,45 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.44 - 2026-11-12
+
+### Verdachte inhoud van .cagefs/tmp en mappen van de ALFA-webshell (`scan_template.php`)
+De hostingpartij wees bij een site op de inhoud van .cagefs/tmp (de tijdelijke map van PHP onder CloudLinux): een PHP-bestand met een nepnaam (`wp-compat-<hex>.php`, op een Joomla-site), een verborgen map `.silent_<hex>` en de map `alfacgiapi`. De scan meldde daar alleen iets als de inhoud van een bestand een bekend patroon raakte, en dat deed dit bestand niet.
+
+- Een map met de naam `alfacgiapi`, `ALFA_DATA` of `alfasymlink` buiten de website: KRITIEK (95). Die namen horen bij de ALFA-webshell.
+- Een PHP-uitvoerbaar bestand in .cagefs/tmp: VERDACHT (80), ongeacht de inhoud. PHP zet daar alleen sessie- en uploadbestanden neer.
+- Een verborgen bestand (naam met een punt voorop) in .cagefs/tmp: VERDACHT (75). PHP noemt sessies `sess_...`; de lader hieronder bewaarde zijn payload als `.sess-<hash>.dat`. Alleen gewone bestanden: de socket van de PostgreSQL-server (`.s.PGSQL.5432`), die CageFS in de tmp van elk account zet, telt niet mee (1.44.1). En pas vanaf 65 bytes: kleiner kan geen payload zijn, en de host zet zelf kleine lock-bestanden als `.crontab.lock` in de tmp van elk account (1.44.3).
+- Een map in .cagefs/tmp: VERDACHT (70), met "verborgen" erbij als de naam met een punt begint.
+- Het eigen scanslot van de monitor (`jvnl-monitor-scanslot-<uid>.lock`) is een gewoon bestand en valt hier niet onder.
+
+### Afwijkende bestanden: CodeMirror en TinyMCE horen bij de Joomla-kern (`scan_template.php`)
+De enige Joomla 6-site tussen Joomla 5-sites kreeg drie "afwijkende bestanden" in plugins/editors/codemirror ("20 van de 22 sites zijn gelijk", met 20 sites onder "Andere versie"). Oorzaak: kernonderdelen werden herkend aan de auteur "Joomla! Project" in hun manifest, maar CodeMirror heeft als auteur de maker van de bibliotheek ("Marijn Haverbeke", versie 6.0.0), en TinyMCE "Tiny Technologies, Inc". Ze werden daardoor als extensie van derden vergeleken, gegroepeerd op hun eigen versienummer. Dat blijft bij CodeMirror op 6.0.0 staan, terwijl de bestanden per Joomla-release veranderen.
+
+- Het scanscript leest nu ook Joomla's eigen lijst met kernonderdelen uit (`libraries/src/Extension/ExtensionHelper.php`). Staat een extensie daarin, dan worden de bestanden bij de Joomla-kernversie gegroepeerd, net als de andere kernonderdelen. Ze vallen daarmee onder de vergelijking met het officiële Joomla-pakket en niet meer onder deze vergelijking tussen sites.
+- Alleen de bestandshashes veranderen; het controleren van updates blijft zoals het was.
+- Na de update verdwijnen de meldingen als alle betrokken sites opnieuw gescand zijn (bij de cron vanzelf).
+
+### Afwijkende bestanden: "inhoud" in plaats van "versie" (`beveiliging.php`)
+De kolom "Zelfde/andere versie bij" heet nu "Zelfde/andere inhoud bij", met "Zelfde inhoud" en "Andere inhoud (Nx)". Het ging altijd al om de inhoud van het bestand: alle sites in de vergelijking hebben dezelfde extensie met hetzelfde versienummer. "Andere versie" wekte de indruk dat de extensie daar een ander versienummer had.
+
+### Afwijkende bestanden: regeleinden tellen niet meer mee (`scan_template.php`, `kern_integriteit_functies.php`, `beveiliging.php`, `auto_migratie.php`)
+Een bestand dat ooit vanaf Windows of via FTP in ASCII-modus is overgezet, heeft Windows-regeleinden (CRLF) en dus een andere hash, terwijl de code gelijk is. Dat gaf "afwijkende bestanden" waarin in de viewer elke regel rood was.
+
+- Bestandshashes (extensies en Joomla-kern) worden nu berekend met genormaliseerde regeleinden (CRLF en CR worden LF). Dat geldt ook voor de officiële Joomla-hashes op de monitor. De cache daarvan wordt in migratiestap 28 geleegd en bij de volgende vergelijking opnieuw opgebouwd.
+- In de viewer wordt op elk soort regeleinde gesplitst, zodat alleen echte verschillen gemarkeerd worden.
+- Afwijkingen die je al op Vertrouwen had gezet voor een bestand met Windows-regeleinden, krijgen een nieuwe hash. Die zijn dan ofwel vanzelf weg (gelijk aan de rest), ofwel moeten ze opnieuw vertrouwd worden.
+
+### Afwijkende bestanden: groeperen op het versienummer op schijf (`scan_template.php`)
+Voor de vergelijking tussen sites werden extensies gegroepeerd op het versienummer uit Joomla's `manifest_cache`. Die wordt alleen bijgewerkt bij een installatie via Joomla zelf. Werkt een extensie onderdelen van zichzelf bij buiten Joomla's installer om, of loopt een update half mis, dan staan er nieuwe bestanden onder een oud versienummer. Twee sites met echt verschillende versies werden dan als "zelfde versie" vergeleken. Herkenbaar aan: opnieuw installeren lost het op.
+
+- De groep krijgt nu het versienummer uit het XML-manifest op schijf (hetzelfde bestand dat bij de bestanden hoort). Alleen als dat niet gevonden wordt, wordt `manifest_cache` gebruikt.
+- Het versienummer dat de monitor bij updates toont, blijft ongewijzigd.
+
+### Nieuw patroon 32: lader zonder eval() (`scan_template.php`)
+Het bestand uit .cagefs/tmp was een lader die geen eval() gebruikt: de code is opgeknipt met goto-sprongen, alle functienamen zijn opgebouwd uit losse ge-escapete stukjes en worden via een array aangeroepen, en de payload wordt elke twee uur van een externe server opgehaald, in de tijdelijke map van PHP gezet en met `include` uitgevoerd. PATROON 28 en 29 vereisen eval() en sloegen niet aan.
+
+- Gemeld als ZEKER BACKDOOR bij de combinatie: minstens 5x goto, include/require van een variabel pad, en een functie aangeroepen via een array of minstens 40 ge-escapete tekens.
+- Geen treffers in het volledige Joomla 5.4-pakket (6.144 PHP-bestanden) en in de monitor zelf.
+
 ## 1.43 - 2026-11-10
 
 ### Scan niet gestart: ook zichtbaar buiten de handmatige scan (`start_scan.php`, `index.php`, `verstuur_notificatie_email.php`, `auto_migratie.php`)

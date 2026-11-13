@@ -172,7 +172,9 @@ function haalOfficieleKernHashes(PDO $pdo, string $kernversie): array
         if ($inhoud === false) {
             continue;
         }
-        $hashes[$relatiefPad] = hash('sha256', $inhoud);
+        // Sinds 1.44 met genormaliseerde regeleinden, net als de hashes die het scanscript van de sites aanlevert
+        // (hashPhpBestandenInMap() in scan_template.php). Oude cache gewist in migratiestap 28.
+        $hashes[$relatiefPad] = hash('sha256', str_replace(["\r\n", "\r"], "\n", $inhoud));
     }
     $zip->close();
     @unlink($tmpBestand);

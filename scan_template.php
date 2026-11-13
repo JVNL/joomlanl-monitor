@@ -510,6 +510,64 @@ function meldKernelprocesNaamBuitenWebsite(string $pad, string $startMap, array 
 }
 
 /**
+ * Sinds 1.43: wat er in .cagefs/tmp (de tijdelijke map van PHP onder CloudLinux, buiten de website) niet hoort. PHP zet
+ * daar sessiebestanden (sess_...) en tijdelijke uploads (php...) neer, dus losse bestanden zonder extensie, en geen
+ * PHP-bestanden of mappen. Aanleiding (november 2026, op aanwijzing van de hostingpartij): in .cagefs/tmp stonden een
+ * PHP-bestand met een nepnaam (wp-compat-<hex>.php, op een Joomla-site), een verborgen map .silent_<hex> en de map
+ * alfacgiapi. Die laatste naam hoort bij de ALFA-webshell (ALFA TEaM), die daarin zijn CGI-hulpscripts (Perl/Python)
+ * neerzet; daarnaast gebruikt die webshell ook ALFA_DATA en alfasymlink. Melding:
+ *  - een map met een naam van de ALFA-webshell (overal buiten de website): KRITIEK;
+ *  - een PHP-uitvoerbaar bestand in .cagefs/tmp: VERDACHT, ongeacht inhoud (de inhoudscontrole draait er los van);
+ *  - een map in .cagefs/tmp: VERDACHT. Het eigen account-scanslot (jvnl-monitor-scanslot-<uid>.lock) is een bestand.
+ * Geeft true terug als er gemeld is.
+ */
+function meldVerdachtInCageFsTmp(string $pad, string $startMap, array &$backdoorVondsten): bool
+{
+    if (strpos($pad, rtrim($startMap, '/') . '/') === 0) {
+        return false;
+    }
+    $naam = basename($pad);
+    $isMap = @is_dir($pad);
+    $inTmp = (bool) preg_match('#[/\\\\]\.cagefs[/\\\\]tmp[/\\\\]#i', $pad);
+
+    if ($isMap && preg_match('/^(alfacgiapi|alfa_data|alfasymlink)$/i', $naam)) {
+        $reden = 'KRITIEK - map "' . $naam . '": deze naam hoort bij de ALFA-webshell, die daarin zijn eigen CGI-hulpscripts '
+            . '(Perl/Python/shell) neerzet om opdrachten op de server uit te voeren. Zoek de webshell zelf (vaak een PHP-bestand '
+            . 'met een onschuldige naam), verwijder beide en controleer crontab';
+        $risico = 95;
+    } elseif ($inTmp && !$isMap && isPhpUitvoerbareExtensie($naam)) {
+        $reden = 'PHP-bestand in .cagefs/tmp (de tijdelijke map van PHP, buiten de website) - PHP zet daar alleen sessie- en '
+            . 'uploadbestanden neer, geen .php; een PHP-bestand hier is vrijwel altijd door een aanvaller neergezet, VERDACHT';
+        $risico = 80;
+    } elseif ($inTmp && !$isMap && $naam[0] === '.' && @is_file($pad) && (int) @filesize($pad) > 64) {
+        // Sinds 1.44.3 pas boven 64 bytes: kleiner kan geen payload zijn (een lader schrijft ruim meer), en de host zet zelf
+        // kleine verborgen lock-bestanden in de tmp van elk account (bv. .crontab.lock, leeg of met een proces-id).
+        // Alleen een gewoon bestand: CageFS zet de socket van de PostgreSQL-server als ".s.PGSQL.5432" in de tmp van elk
+        // account (sinds 1.44.1 niet meer gemeld) - een socket is geen bestand en kan geen payload bevatten.
+        // Sinds 1.44: verborgen bestand. PHP noemt sessiebestanden "sess_..." (zonder punt); de lader hierboven bewaarde
+        // zijn payload als ".sess-<hash>.dat" - op het eerste gezicht een sessiebestand.
+        $reden = 'verborgen bestand in .cagefs/tmp (de tijdelijke map van PHP, buiten de website) - PHP zet daar geen bestanden '
+            . 'met een punt voorop neer (sessies heten sess_...); kan de opgehaalde payload van een lader zijn, VERDACHT';
+        $risico = 75;
+    } elseif ($inTmp && $isMap) {
+        $reden = 'map in .cagefs/tmp (de tijdelijke map van PHP, buiten de website)' . ($naam[0] === '.' ? ', verborgen' : '')
+            . ' - PHP zet daar alleen losse sessie- en uploadbestanden neer, geen mappen; kijk wat erin staat, VERDACHT';
+        $risico = 70;
+    } else {
+        return false;
+    }
+    $backdoorVondsten[] = [
+        'naam' => $pad,
+        'reden' => $reden,
+        'risico' => $risico,
+        'bestandspad' => $pad,
+        'gewijzigd' => date('Y-m-d H:i', @filemtime($pad) ?: time()),
+        'grootte' => $isMap ? 0 : (int) @filesize($pad),
+    ];
+    return true;
+}
+
+/**
  * Meldt een gsocket-signatuur in een (niet-uitvoerbaar, niet-PHP) bestand. Geeft true terug als er gemeld is.
  */
 function meldGsocketSignatuur(string $pad, string $startMap, array &$backdoorVondsten): bool
@@ -3019,6 +3077,41 @@ function detecteerTekentabelObfuscatie(string $inhoud): ?string
 }
 
 /**
+ * Sinds 1.44: lader zonder eval() - de code is opgeknipt met goto-sprongen, en voert opgehaalde code uit via include
+ * van een variabel pad. Aanleiding (november 2026): .cagefs/tmp/wp-compat-<hex>.php op een Joomla-site, 2 KB. Alle
+ * functienamen (file_get_contents, file_put_contents, stream_context_create, sys_get_temp_dir ...) opgebouwd uit losse
+ * ge-escapete stukjes en via een array aangeroepen ($_r["g"](...)); de URL van de payload ook uit stukjes; de payload
+ * wordt elke twee uur opgehaald, als verborgen ".sess-<hash>.dat" in de tijdelijke map van PHP gezet en met include
+ * uitgevoerd. Geen eval(), dus PATROON 28/29 sloegen niet aan. Gemeld bij de combinatie: minstens 5x goto + include/
+ * require van een variabele + (een functie aangeroepen via een variabele/array, of veel ge-escapete tekens) - komt in
+ * normale code niet voor.
+ */
+function detecteerGotoIncludeLader(string $inhoud): ?string
+{
+    $aantalGotos = preg_match_all('/\bgoto\s+[A-Za-z_]\w*\s*;/', $inhoud);
+    if ($aantalGotos < 5) {
+        return null;
+    }
+    if (!preg_match('/\b(include|require)(_once)?\s*\(?\s*\$\w+/i', $inhoud)) {
+        return null;
+    }
+    $signalen = [];
+    if (preg_match('/\$\w+\s*\[\s*["\'][^"\']{1,20}["\']\s*\]\s*\(/', $inhoud)) {
+        $signalen[] = 'functies aangeroepen via een array ($x["..."](...))';
+    }
+    $aantalEscapes = preg_match_all('/\\\\(?:x[0-9a-fA-F]{2}|[0-7]{2,3})/', $inhoud);
+    if ($aantalEscapes >= 40) {
+        $signalen[] = $aantalEscapes . ' ge-escapete tekens';
+    }
+    if (empty($signalen)) {
+        return null;
+    }
+
+    return 'GEOBFUSCEERDE LADER - ' . $aantalGotos . 'x goto i.c.m. include van een variabel pad; ' . implode('; ', $signalen)
+        . ' - haalt vermoedelijk code op en voert die uit zonder eval(), ZEKER BACKDOOR';
+}
+
+/**
  * Bekende, complete remote-beheerscripts ("file manager"-achterdeuren) herkennen aan vaste namen in de code.
  * "aqua": Chinese remote file manager (september 2026 in .cagefs/tmp aangetroffen), met o.a. eval() van
  * meegestuurde code (bundle_beima), zelfverspreiding (spread), code bovenin index.php zetten, defines.php schrijven
@@ -3808,6 +3901,17 @@ function scanPhpVoorBackdoors($bestandpad, &$vondsten, &$mogelijkLegitiem, $igno
             $reden .= ' [+ ' . $tabelMelding . ']';
         } else {
             $reden = $tabelMelding;
+            $verdacht = true;
+        }
+    }
+
+    // PATROON 32 (sinds 1.44): lader zonder eval() - goto + include van een variabel pad, zie detecteerGotoIncludeLader().
+    $gotoLader = detecteerGotoIncludeLader($inhoud);
+    if ($gotoLader !== null) {
+        if ($verdacht) {
+            $reden .= ' [+ ' . $gotoLader . ']';
+        } else {
+            $reden = $gotoLader;
             $verdacht = true;
         }
     }
@@ -4766,6 +4870,8 @@ function scanRecursief($pad, &$backdoorVondsten, &$htaccessVondsten, &$mogelijkL
         if (meldKernelprocesNaamBuitenWebsite($volledigPad, $startMap, $backdoorVondsten)) {
             $uitvoerbaarGemeld = true;
         }
+        // Sinds 1.43: PHP-bestanden en mappen in .cagefs/tmp, en mappen van de ALFA-webshell (zie meldVerdachtInCageFsTmp()).
+        meldVerdachtInCageFsTmp($volledigPad, $startMap, $backdoorVondsten);
 
         if ($rechtenAfwijkingen !== null && $diepte > 0 && !$binnenCageFsOfClSelector && !$uitvoerbaarGemeld
             && !isAkeebaBackupArchiefVanDezeSite($volledigPad, $startMap)) {
@@ -5978,6 +6084,34 @@ function haalHoogsteStabieleVersieUitXml($xmlInhoud, $huidigeVersie = null, $max
  * eigen mapstructuur, en worden dus via hun eigen rij meegenomen).
  */
 /**
+ * Sinds 1.44: Joomla's eigen lijst met kernonderdelen (ExtensionHelper::$coreExtensions in
+ * libraries/src/Extension/ExtensionHelper.php), statisch uitgelezen - het scanscript start Joomla niet op. Sleutels
+ * "type|element|folder|client_id". Nodig omdat een paar kernonderdelen in hun manifest niet "Joomla! Project" als
+ * auteur hebben maar de maker van de meegeleverde bibliotheek: de CodeMirror-editor ("Marijn Haverbeke", versie
+ * 6.0.0) en TinyMCE ("Tiny Technologies, Inc"). Die werden daardoor als extensie van derden behandeld en in de
+ * vergelijking tussen sites gegroepeerd op hun eigen versienummer - en dat blijft bij CodeMirror 6.0.0 terwijl de
+ * bestanden per Joomla-release veranderen. Gevolg (november 2026): de enige Joomla 6-site tussen 21 Joomla 5-sites
+ * kreeg drie "afwijkende bestanden" in plugins/editors/codemirror. Lege lijst als het bestand ontbreekt (Joomla 3).
+ *
+ * @return array<string, true>
+ */
+function haalJoomlaKernExtensieLijst(string $startMap): array
+{
+    static $cache = [];
+    if (isset($cache[$startMap])) {
+        return $cache[$startMap];
+    }
+    $lijst = [];
+    $inhoud = @file_get_contents(rtrim($startMap, '/') . '/libraries/src/Extension/ExtensionHelper.php');
+    if (is_string($inhoud) && preg_match_all("/\\[\\s*'(\\w+)'\\s*,\\s*'([\\w.\\-]+)'\\s*,\\s*'([\\w\\-]*)'\\s*,\\s*(\\d)\\s*\\]/", $inhoud, $m, PREG_SET_ORDER)) {
+        foreach ($m as $treffer) {
+            $lijst[strtolower($treffer[1] . '|' . $treffer[2] . '|' . $treffer[3] . '|' . $treffer[4])] = true;
+        }
+    }
+    return $cache[$startMap] = $lijst;
+}
+
+/**
  * Bepaalt de geïnstalleerde Joomla-kernversie via libraries/src/Version.php
  * (aanwezig sinds Joomla 4). Wordt gebruikt om kernbestand-hashes per exacte
  * Joomla-versie te groeperen (zie hieronder) - los van, en sneller dan, de
@@ -6074,10 +6208,15 @@ function hashPhpBestandenInMap(string $startMap, string $relatieveMap, int $maxB
             continue;
         }
 
-        $hash = @hash_file('sha256', $bestand->getPathname());
-        if ($hash === false) {
+        // Sinds 1.44: hash over de inhoud met genormaliseerde regeleinden (CRLF/CR -> LF). Een bestand dat ooit vanaf
+        // Windows of via FTP in ASCII-modus is overgezet, heeft dezelfde code maar andere regeleinden - dat gaf in de
+        // vergelijking tussen sites een "afwijkend bestand" waarin elke regel verschilde. Zelfde normalisatie op de
+        // monitor voor de officiële Joomla-hashes (kern_integriteit_functies.php).
+        $inhoudVoorHash = @file_get_contents($bestand->getPathname());
+        if ($inhoudVoorHash === false) {
             continue;
         }
+        $hash = hash('sha256', str_replace(["\r\n", "\r"], "\n", $inhoudVoorHash));
 
         $relatiefPadBestand = $relatieveMap . '/' . substr($bestand->getPathname(), strlen($volledigePad) + 1);
         $relatiefPadBestand = str_replace('\\', '/', $relatiefPadBestand);
@@ -6304,7 +6443,9 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
             }
             $volledigPad = $startMap . '/' . $relBestand;
             if (is_readable($volledigPad)) {
-                $hash = @hash_file('sha256', $volledigPad);
+                // Sinds 1.44 met genormaliseerde regeleinden - zie hashPhpBestandenInMap().
+                $losInhoud = @file_get_contents($volledigPad);
+                $hash = $losInhoud === false ? false : hash('sha256', str_replace(["\r\n", "\r"], "\n", $losInhoud));
                 if ($hash !== false) {
                     $bestandHashesPerGroep[$groepSleutel][$relBestand] = $hash;
                     $totaalGehashteBestanden++;
@@ -6380,6 +6521,12 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
 
         $isKern = ($auteur !== null && stripos($auteur, 'joomla! project') !== false && !$isLosVerspreideJoomlaExtensie)
             || ($rij['type'] === 'file' && $rij['element'] === 'joomla');
+
+        // Sinds 1.44: ook kernonderdelen met de maker van een meegeleverde bibliotheek als auteur (CodeMirror, TinyMCE) -
+        // zie haalJoomlaKernExtensieLijst(). Alleen voor de bestandshashes: de rest van de scan (update-feeds) blijft
+        // ongewijzigd, zodat een kernonderdeel dat los een feed heeft daar niets van merkt.
+        $isKernVoorHashes = $isKern || isset(haalJoomlaKernExtensieLijst($startMap)[strtolower(
+            $rij['type'] . '|' . $rij['element'] . '|' . ($rij['folder'] ?? '') . '|' . (int) ($rij['client_id'] ?? 0))]);
 
         if ((int) ($rij['package_id'] ?? 0) > 0) {
             $diagnose['aantal_pakket_onderdeel']++;
@@ -6547,10 +6694,32 @@ function haalGeinstalleerdeExtensies(?array $dbInfo, string $startMap, int $scri
                 }
             }
 
-            if ($versie !== null && $totaalGehashteBestanden < $maxTotaalBestanden && !$tijdslimietBereikt) {
+            // Sinds 1.44: een kernonderdeel met een andere auteur (CodeMirror, TinyMCE) hoort bij de kern-groep, niet bij
+            // een groep op zijn eigen versienummer - zie haalJoomlaKernExtensieLijst().
+            if ($isKernVoorHashes && $joomlaKernVersie !== null && $totaalGehashteBestanden < $maxTotaalBestanden && !$tijdslimietBereikt) {
+                $kernGroep = 'kern_joomla_' . str_replace('.', '_', $joomlaKernVersie);
+                foreach (bepaalExtensieMappen($rij) as $map) {
+                    foreach (hashPhpBestandenInMap($startMap, $map) as $pad => $hash) {
+                        if ($totaalGehashteBestanden >= $maxTotaalBestanden) {
+                            break 2;
+                        }
+                        $bestandHashesPerGroep[$kernGroep][$pad] = $hash;
+                        $totaalGehashteBestanden++;
+                    }
+                }
+            }
+
+            if ($versie !== null && $totaalGehashteBestanden < $maxTotaalBestanden && !$tijdslimietBereikt && !$isKernVoorHashes) {
                 $mappen = bepaalExtensieMappen($rij);
                 if (!empty($mappen)) {
-                    $groepSleutel = strtolower($rij['type'] . '_' . $rij['element'] . '_' . $versie);
+                    // Sinds 1.44: groeperen op het versienummer uit het XML-manifest OP SCHIJF, niet op Joomla's
+                    // manifest_cache. Die cache wordt alleen bij een installatie via Joomla bijgewerkt; werkt een
+                    // extensie zichzelf (of onderdelen van zichzelf) bij buiten Joomla's installer om, of loopt een
+                    // update half mis, dan staan er nieuwe bestanden onder een oud versienummer - en werden twee
+                    // sites met écht verschillende versies als "zelfde versie" vergeleken. De bestanden op schijf
+                    // horen bij het manifest op schijf. Geen manifest gevonden: terugvallen op de cache.
+                    $versieVoorHashes = haalVersieUitEigenManifestbestand($startMap, $rij) ?? $versie;
+                    $groepSleutel = strtolower($rij['type'] . '_' . $rij['element'] . '_' . $versieVoorHashes);
 
                     foreach ($mappen as $map) {
                         $hashes = hashPhpBestandenInMap($startMap, $map);

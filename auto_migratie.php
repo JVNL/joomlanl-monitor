@@ -614,6 +614,18 @@ function haalMigraties(): array
             zorgVoorScanStartFoutKolommen($pdo);
         },
 
+        // ----------------------------------------------------------------
+        // Stap 28 (versie 1.44): bestandshashes worden sindsdien berekend
+        // met genormaliseerde regeleinden. De gecachte officiële Joomla-
+        // hashes zijn nog op de oude manier berekend - leegmaken, ze worden
+        // bij de eerstvolgende vergelijking opnieuw opgehaald.
+        // ----------------------------------------------------------------
+        28 => function (PDO $pdo) {
+            if (tabelBestaat($pdo, 'kern_officiele_hashes')) {
+                $pdo->exec("DELETE FROM `kern_officiele_hashes`");
+            }
+        },
+
     ];
 }
 

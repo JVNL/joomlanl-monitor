@@ -229,14 +229,14 @@ function renderAfwijkingRij(array $afwijking, string $viewerIdPrefix, bool $isVe
             </span>
         <?php endif; ?>
     </td>
-    <td data-label="Zelfde/andere versie bij" style="font-size: 12px;">
+    <td data-label="Zelfde/andere inhoud bij" style="font-size: 12px;">
         <div style="margin-bottom: 6px;">
-            <strong>Zelfde versie:</strong><br>
+            <strong>Zelfde inhoud:</strong><br>
             <?php echo renderAndereSitesLijst($afwijking['zelfde_versie_sites'], $viewerIdPrefix); ?>
         </div>
         <?php foreach ($afwijking['andere_versie_groepen'] as $hashGroep => $sitesInGroep): ?>
         <div style="margin-bottom: 6px;">
-            <strong>Andere versie (<?php echo count($sitesInGroep); ?>x):</strong><br>
+            <strong>Andere inhoud (<?php echo count($sitesInGroep); ?>x):</strong><br>
             <?php echo renderAndereSitesLijst($sitesInGroep, $viewerIdPrefix); ?>
         </div>
         <?php endforeach; ?>
@@ -316,7 +316,7 @@ function renderBulkClusterRij(array $cluster, string $viewerIdPrefix, bool $isVe
                     <th style="width: 20%;">Extensie + versie</th>
                     <th style="width: 22%;">Bestand</th>
                     <th style="width: 15%;">Verhouding</th>
-                    <th style="width: 23%;">Zelfde/andere versie bij</th>
+                    <th style="width: 23%;">Zelfde/andere inhoud bij</th>
                     <th style="width: 150px;">
                         Actie
                         <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">
@@ -1243,16 +1243,16 @@ if (!empty($site['super_users_json'])) {
     uniek genereert (bijv. een geheime sleutel).
     <br><br>
     <strong>👁️ Bekijk (deze site)</strong> toont de huidige inhoud van het bestand op déze site, in het linker
-    paneel hieronder. Bij "Zelfde versie bij" / "Andere versie bij" in de tabel staan de andere site(s) die dit
-    bestand hebben, elk met een eigen 🔍-link - klik daarop om de inhoud van díe site ernaast in het rechter
+    paneel hieronder. Bij "Zelfde inhoud" / "Andere inhoud" in de tabel staan de andere site(s) die dit
+    bestand hebben (bij dezelfde extensie en hetzelfde versienummer; "inhoud" gaat over het bestand zelf), elk met een eigen 🔍-link - klik daarop om de inhoud van díe site ernaast in het rechter
     paneel te laden, zodat je de twee écht naast elkaar kunt vergelijken zonder zelf via FTP te hoeven zoeken.
     <br>
     <strong>✅ Vertrouwen</strong> markeert een afwijking als onschuldig - telt dan niet meer mee als waarschuwing
     (ook niet op de monitor-overzichtspagina), tenzij het bestand hier later opnieuw verandert.
     <br><br>
     Staat er <strong>"geen duidelijke meerderheid"</strong>? Dan zijn de sites met dit bestand onderling verdeeld
-    (bijv. 1 tegen 1, of 2 tegen 2) - er is dan geen versie die vaker voorkomt dan de andere(n), dus is het niet
-    per se déze site die de afwijkende/foute is. Gebruik de 🔍-links om de andere versie(s) te bekijken en zelf te
+    (bijv. 1 tegen 1, of 2 tegen 2) - er is dan geen inhoud die vaker voorkomt dan de andere(n), dus is het niet
+    per se déze site die de afwijkende/foute is. Gebruik de 🔍-links om de andere inhoud te bekijken en zelf te
     bepalen welke correct is.
     <br><br>
     Wijken van dezelfde extensie veel bestanden tegelijk op precies dezelfde manier af? Dan worden die
@@ -1268,7 +1268,7 @@ if (!empty($site['super_users_json'])) {
     <th style="width: 20%;">Extensie + versie</th>
     <th style="width: 22%;">Bestand</th>
     <th style="width: 15%;">Verhouding</th>
-    <th style="width: 23%;">Zelfde/andere versie bij</th>
+    <th style="width: 23%;">Zelfde/andere inhoud bij</th>
     <th style="width: 150px;">Actie</th>
 </tr>
 <?php
@@ -1295,7 +1295,7 @@ foreach ($gegroepeerdActief['los'] as $afwijking) {
     <th style="width: 20%;">Extensie + versie</th>
     <th style="width: 22%;">Bestand</th>
     <th style="width: 15%;">Verhouding</th>
-    <th style="width: 23%;">Zelfde/andere versie bij</th>
+    <th style="width: 23%;">Zelfde/andere inhoud bij</th>
     <th style="width: 150px;">Actie</th>
 </tr>
 <?php
@@ -1983,7 +1983,9 @@ function pasRegelDiffToe(paarPrefix) {
         return; // (kan gebeuren als de twee panelen toevallig bij verschillende rijen horen) - geen zinnige vergelijking dan
     }
 
-    const diff = eenvoudigeRegelDiff(paar.a.inhoud.split('\n'), paar.b.inhoud.split('\n'));
+    // Sinds 1.44 op elk soort regeleinde splitsen: met alleen '\n' hield een bestand met Windows-regeleinden (CRLF) aan
+    // elke regel een '\r' over, en werd naast een gewoon bestand dus elke regel als afwijkend gemarkeerd.
+    const diff = eenvoudigeRegelDiff(paar.a.inhoud.split(/\r\n|\r|\n/), paar.b.inhoud.split(/\r\n|\r|\n/));
 
     [['a', diff ? diff.a : null], ['b', diff ? diff.b : null]].forEach(([kant, regels]) => {
         const paneel = document.getElementById(paarPrefix + '-' + kant);

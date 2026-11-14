@@ -39,6 +39,25 @@ function kolomBestaat(PDO $pdo, string $tabel, string $kolom): bool
 }
 
 /**
+ * Zet de kolom relatief_pad van een tabel om naar utf8mb4_bin (hoofdlettergevoelig), als dat nog niet zo is
+ * (migratiestap 29, sinds 1.45). Linux maakt onderscheid tussen hoofdletters en kleine letters in bestandsnamen,
+ * dus de database moet dat ook doen. Van _ci naar _bin kan nooit een dubbele sleutel opleveren (_bin is strenger).
+ */
+function zorgVoorHoofdlettergevoeligPad(PDO $pdo, string $tabel): void
+{
+    $stmt = $pdo->prepare("
+        SELECT COLLATION_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'relatief_pad'
+    ");
+    $stmt->execute([$tabel]);
+    $collatie = $stmt->fetchColumn();
+    if ($collatie === false || $collatie === 'utf8mb4_bin') {
+        return; // tabel/kolom bestaat niet, of staat al goed
+    }
+    $pdo->exec("ALTER TABLE `$tabel` MODIFY `relatief_pad` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL");
+}
+
+/**
  * Kolom voor de eigen uitsluitpatronen per site (migratiestap 25). Ook los aangeroepen vanuit site_instellingen.php
  * vóór het opslaan: op een installatie waar stap 25 niet is uitgevoerd (bijv. omdat schema_versie daar al een hoger
  * nummer had door eigen tussenstappen), gaf opslaan anders een fatale fout "Unknown column".
@@ -623,6 +642,30 @@ function haalMigraties(): array
         28 => function (PDO $pdo) {
             if (tabelBestaat($pdo, 'kern_officiele_hashes')) {
                 $pdo->exec("DELETE FROM `kern_officiele_hashes`");
+            }
+        },
+
+        // ----------------------------------------------------------------
+        // Stap 29 (versie 1.45): relatief_pad hoofdlettergevoelig maken
+        // (utf8mb4_bin). Met de standaardcollatie (utf8mb4_general_ci) zag de
+        // unieke sleutel twee paden die alleen in hoofdletters verschillen
+        // (bv. tmpl/NginXConfMaker/plain.php van een oude versie naast
+        // tmpl/nginxconfmaker/plain.php van de huidige) als hetzelfde pad:
+        // ON DUPLICATE KEY UPDATE schreef dan de hash van het ene bestand weg
+        // onder het pad van het andere. Zie zorgVoorHoofdlettergevoeligPad().
+        // Alle zes tabellen in één keer, zodat de JOIN's op relatief_pad
+        // (index.php) niet op een "Illegal mix of collations" stuklopen.
+        // ----------------------------------------------------------------
+        29 => function (PDO $pdo) {
+            foreach ([
+                'extensie_bestand_hashes',
+                'extensie_bestand_afwijkingen',
+                'extensie_bestand_vertrouwd',
+                'kern_officiele_hashes',
+                'kern_bestand_afwijkingen',
+                'kern_vertrouwd',
+            ] as $tabel) {
+                zorgVoorHoofdlettergevoeligPad($pdo, $tabel);
             }
         },
 

@@ -1,5 +1,17 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.45 - 2026-11-14
+
+### Afwijkende bestanden: paden hoofdlettergevoelig (`auto_migratie.php`)
+Een bestand werd als "afwijkend" gemeld, terwijl "Bekijk" op die site precies dezelfde inhoud liet zien als op de andere sites. Oorzaak: na een update van een extensie stonden er twee mappen naast elkaar die alleen in hoofdletters verschilden (een oude viewmap met hoofdletters, en de huidige met kleine letters, elk met een eigen versie van hetzelfde bestand). Het scanscript hashte beide bestanden apart, maar de database maakte bij het pad geen onderscheid tussen hoofdletters en kleine letters (collatie `utf8mb4_general_ci`). De unieke sleutel zag beide paden als hetzelfde pad, en de hash van het oude bestand kwam terecht onder het pad van het nieuwe. "Bekijk" opende daarna het nieuwe bestand, dat wel gelijk was aan de rest.
+
+- Migratiestap 29 zet `relatief_pad` om naar `utf8mb4_bin` in `extensie_bestand_hashes`, `extensie_bestand_afwijkingen`, `extensie_bestand_vertrouwd`, `kern_officiele_hashes`, `kern_bestand_afwijkingen` en `kern_vertrouwd`.
+- Beide bestanden worden nu apart opgeslagen. Een achtergebleven oude map verschijnt alleen als afwijking als hetzelfde pad (met dezelfde hoofdletters) op minstens één andere site voorkomt; staat de oude map maar op één site, dan wordt die niet vergeleken en ook niet gemeld.
+- De bestaande, samengevoegde hashes worden vervangen zodra een site opnieuw gescand is. Daarna één keer "Scan en check sites" (of de cron) voor een kloppende vergelijking.
+
+### Help: restanten van oudere versies (`help.php`)
+Nieuwe paragraaf bij "Afwijkende extensiebestanden": de meest voorkomende oorzaak van een afwijking is een bestand van een oudere versie dat bij een update is blijven staan (Joomla's installer verwijdert geen vervallen bestanden). Met hoe je dat herkent en controleert tegen het installatiepakket, dat de meerderheid niet altijd de juiste versie heeft, de mappen die alleen in hoofdletters verschillen, en waarom een restant op één site niet gemeld wordt.
+
 ## 1.44 - 2026-11-12
 
 ### Verdachte inhoud van .cagefs/tmp en mappen van de ALFA-webshell (`scan_template.php`)

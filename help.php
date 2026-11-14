@@ -832,6 +832,32 @@ th {
         soort geïsoleerde afwijking die de moeite waard is om handmatig te controleren.
     </div>
 
+    <h3 id="restanten">Restanten van oudere versies (de meest voorkomende oorzaak)</h3>
+    <p>Joomla's installer kopieert bij een update alleen wat in het nieuwe pakket zit. Bestanden en mappen die in een nieuwere versie zijn vervallen of hernoemd, blijven gewoon staan, tenzij de extensie die zelf opruimt in zijn installatiescript. Veel extensies doen dat niet. Welk restant er op een site staat, hangt af van de versie waarmee die site ooit met de extensie begon. Daardoor verschillen zulke oude bestanden tussen je sites, en meldt de monitor ze als afwijkend. Dit komt voor bij veelgebruikte extensies, zoals die van Akeeba, YOOtheme en RSJoomla.</p>
+    <div class="stap"><strong>Herkennen</strong>: alleen het commentaar bovenin verschilt (bijv. het jaartal in de copyright-regel), of de code is wel anders maar ziet eruit als gewone code van de maker, zonder eval, base64 of een vreemde include.</div>
+    <div class="stap"><strong>Controleren</strong>: pak het installatiepakket van precies die versie uit en kijk of het bestand erin zit. Let op: modules, plugins en dergelijke staan vaak in een submap (bijv. <code>packages/</code>) of als zip in de zip.
+        <ul>
+            <li><strong>Het bestand zit niet in het pakket</strong>: het is een restant. Joomla gebruikt het niet meer; het kan op álle sites weg, ook op de sites waar het niet gemeld wordt.</li>
+            <li><strong>Het bestand zit wel in het pakket</strong>: vergelijk de hash van het bestand uit het pakket (in PowerShell: <code>Get-FileHash bestand.php -Algorithm SHA256</code>) met die op je sites. Wie afwijkt, heeft de extensie niet goed bijgewerkt: opnieuw installeren lost het op.</li>
+        </ul>
+    </div>
+    <div class="tip">
+        💡 "Meerderheid" betekent niet altijd "juist". Bij restanten heeft vaak de meerderheid van je sites het oude
+        bestand en is juist de site die afwijkt (bijv. na een nieuwe installatie) de goede. Het installatiepakket is
+        de enige echte maatstaf.
+    </div>
+    <div class="tip">
+        💡 Twee mappen die alleen in hoofdletters verschillen, bijv. <code>tmpl/NginXConfMaker</code> naast
+        <code>tmpl/nginxconfmaker</code>: de oude map met hoofdletters is een restant uit een versie van vóór de
+        hernoeming. Linux ziet het als twee verschillende mappen, Windows en macOS niet - daardoor merkt de maker het
+        zelf vaak niet. Sinds 1.45 slaat de monitor beide paden apart op. Via FTP zie je ze allebei; de oude map kan weg.
+    </div>
+    <div class="tip">
+        💡 Een restant dat maar op één site staat, of op alle sites precies hetzelfde is, wordt niet gemeld: er is
+        dan niets om mee te vergelijken of geen verschil. Vind je bij één site een restant, kijk dan ook op je andere
+        sites met dezelfde extensie.
+    </div>
+
     <h3>Kernbestand-integriteit tegen het officiële Joomla-pakket</h3>
     <p>Naast de meerderheidsvergelijking hierboven (die kijkt naar wat de MEESTE van je eigen sites hebben) staat er, als er iets gevonden is, een aparte sectie <strong>"🛡️ Kernbestanden vs. officieel Joomla-pakket"</strong> - een rechtstreekse vergelijking met het officiële, ongewijzigde Joomla-pakket van de officiële Joomla-downloadserver. Dat pakket wordt altijd op de monitor zelf gedownload, nooit op een klantsite, en maar één keer per daadwerkelijk voorkomende Joomla-kernversie.</p>
     <div class="tip">

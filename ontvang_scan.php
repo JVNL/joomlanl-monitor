@@ -274,7 +274,7 @@ if (isset($data['php_versie']) && is_string($data['php_versie'])
 // verzoeken van websites blokkeert), vult de monitor de nieuwste versie aan
 // uit de feed die één van de sites - of de monitor zelf - eerder ophaalde.
 // De feed-URL komt gewoon uit het scanresultaat: niets handmatigs in de
-// catalogus nodig, en niets naar Github. Zie feed_terugval_functies.php.
+// catalogus nodig. Zie feed_terugval_functies.php.
 //
 // Bewust HIER, vóór de transactie hieronder: zo wachten er geen
 // databasevergrendelingen op een netwerkverzoek, en verwerkt de rest van

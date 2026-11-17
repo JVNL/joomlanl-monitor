@@ -669,6 +669,19 @@ function haalMigraties(): array
             }
         },
 
+        // ----------------------------------------------------------------
+        // Stap 30 (versie 1.46): de Github-synchronisatie van de catalogus is
+        // verwijderd. Het opgeslagen (versleutelde) Github-token wordt niet
+        // meer gebruikt en hoeft niet in de database te blijven staan. De
+        // kolom extensie_catalogus.feed_lokaal blijft bestaan maar wordt
+        // niet meer gelezen of geschreven.
+        // ----------------------------------------------------------------
+        30 => function (PDO $pdo) {
+            if (tabelBestaat($pdo, 'instellingen')) {
+                $pdo->prepare("DELETE FROM `instellingen` WHERE sleutel = ?")->execute(['catalogus_github_token']);
+            }
+        },
+
     ];
 }
 

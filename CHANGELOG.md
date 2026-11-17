@@ -1,5 +1,41 @@
 # Wijzigingslogboek - Mijn Websites Monitor
 
+## 1.46 - 2026-11-17
+
+### Help opnieuw ingedeeld (`help.php`)
+De help was in de loop van de versies gegroeid en had verwijzingen naar verkeerde hoofdstukken, dubbele stukken die elkaar tegenspraken, en onderdelen die niet meer klopten.
+
+- Nieuwe indeling in 16 hoofdstukken, met een inhoudsopgave bovenaan en een kort eerste hoofdstuk over hoe de monitor werkt. Eén hoofdstuk voor alles rond het scanscript (bestandsnaam, plaatsen, zelf bijwerken, FTP-problemen), een eigen hoofdstuk voor firewall-extensies, scannen (één site, alle sites, cronjob) samen in één hoofdstuk, en het beveiligingsrapport gesplitst in het rapport zelf, wat het scanscript controleert, en afwijkende bestanden/kernbestanden.
+- Alle verwijzingen naar hoofdstukken kloppen weer.
+- Gecorrigeerd: na het wijzigen van de geheime code of het monitorpad werkt het scanscript zichzelf niet bij; het moet opnieuw naar de sites. De help zei op twee plekken het tegendeel.
+- Gecorrigeerd: `.cagefs` en `.cl.selector` worden op inhoud gescand; de help zei op één plek dat ze worden overgeslagen.
+- Aangevuld: "⛔ Scan niet gestart", de link "→ updates", de schakelaar "Ook websites van anderen (alleen beveiliging)", de regels voor `.cagefs/tmp` en de ALFA-mappen, uitvoerbare bestanden, crontab en opstartbestanden buiten de website, en de controle op JCE-profielen.
+- Dubbele stukken samengevoegd (monitornaam, FTP-icoontje, Admin Tools, `.cagefs`), en verwijzingen naar oudere versies weggehaald.
+- Hulpicoontjes op de configuratiepagina (blok "Site-scanscript" en het Admin Tools-blok) en bij de kolom "Domein" wijzen naar de juiste plek. De uitleg bij "Database-gegevens" zei ten onrechte "alleen-lezen".
+
+### Github-synchronisatie van de catalogus en het opschoonscript verwijderd (`configuratie.php`, `extensie_beheer.php`, `auto_migratie.php`)
+De gedeelde catalogus van update-feed-URL's op Github was bedoeld voor extensies die niet automatisch herkend werden. Sinds de monitor update-feeds zelf centraal ophaalt, is die niet meer nodig.
+
+- Verwijderd: `catalogus_github_sync.php`, `catalogus_github_ajax.php` en `opschoon_catalogus.php` (dat laatste was via de browser ook zonder login aan te roepen).
+- Configuratie: het blok "Github-synchronisatie catalogus" is weg.
+- Extensies beheren: geen importmelding, geen badges "gedeeld"/"lokaal" en één gewone "Opslaan"-knop. Zelf ingevulde update-feed-URL's blijven gewoon werken; ze staan in de eigen database.
+- Migratiestap 30 verwijdert het opgeslagen Github-token. De kolom `feed_lokaal` blijft staan, maar wordt niet meer gebruikt.
+- Ook verwijderd: `am_final.php`, een oude, nergens gebruikte kopie van `auto_migratie.php`.
+
+### Pakketmaker verwijderd (`configuratie.php`, `installeer.php`)
+Installeren en bijwerken gaat via de releases op Github (zie `LEES_DIT_EERST.txt`). De oude pakketmaker op de configuratiepagina is daarmee overbodig.
+
+- Het blok "Installatie- en updatepakket" op de configuratiepagina is weg. Het verscheen alleen als `maak_installatiepakket.php`, `maak_updatepakket.php` en `pakket_voorbereiden.php` op de monitor stonden; die bestanden zaten niet in de repo.
+- `extensie_catalogus_seed.php` (een door de pakketmaker gemaakte startcatalogus) is verwijderd, en de installatiewizard leest hem niet meer in.
+- Help hoofdstuk 15 beschrijft nu installeren en bijwerken via de releases.
+- `LEES_DIT_EERST.txt`: bij schoon opnieuw neerzetten ook de map `uitbreidingen/` laten staan.
+
+### Bestanden om zelf te verwijderen
+Een update overschrijft alleen bestanden. Verwijder deze zelf van de monitor: `catalogus_github_sync.php`, `catalogus_github_ajax.php`, `opschoon_catalogus.php`, `am_final.php`, `extensie_catalogus_seed.php`, en (als ze er staan) `maak_installatiepakket.php`, `maak_updatepakket.php` en `pakket_voorbereiden.php`.
+
+### Knop voor losse uitbreidingen (`index.php`)
+Naast "Hostingoverzicht" verschijnt de knop "📦 Updates" als de map `uitbreidingen/updates/` met `updates.php` op de monitor staat. Zo'n uitbreiding hoort niet bij de monitor, wordt apart bijgehouden en heeft een eigen versienummer. Zonder uitbreiding verandert er niets.
+
 ## 1.45 - 2026-11-14
 
 ### Afwijkende bestanden: paden hoofdlettergevoelig (`auto_migratie.php`)

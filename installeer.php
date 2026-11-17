@@ -212,24 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$sleutel, $waarde]);
                 }
 
-                // 5. Meegeleverde extensiecatalogus (extensies met een reeds
-                //    bekende update-feed-URL) inladen, als dat bestand aanwezig is.
-                $catalogusPad = __DIR__ . '/extensie_catalogus_seed.php';
-                if (is_readable($catalogusPad)) {
-                    $seedData = include $catalogusPad;
-                    if (is_array($seedData)) {
-                        $catStmt = $testPdo->prepare("
-                            INSERT INTO extensie_catalogus (sleutel, label, manifest_pad, update_feed_url, genegeerd)
-                            VALUES (?, ?, NULL, ?, 0)
-                            ON DUPLICATE KEY UPDATE update_feed_url = VALUES(update_feed_url)
-                        ");
-                        foreach ($seedData as $rij) {
-                            $catStmt->execute([$rij['sleutel'], $rij['label'], $rij['update_feed_url']]);
-                        }
-                    }
-                }
-
-                // 6. Zichzelf vergrendelen.
+                // 5. Zichzelf vergrendelen.
                 file_put_contents($slotBestand, 'Installatie voltooid op ' . date('Y-m-d H:i:s') . "\n");
 
                 $succes = true;

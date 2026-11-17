@@ -11,7 +11,6 @@ header('Pragma: no-cache');
 require_once 'config.php';
 require_once 'csrf_functies.php';
 require_once 'versie_vergelijk_functies.php';
-require_once 'catalogus_github_sync.php';
 
 $foutmelding   = '';
 $succesmelding = '';
@@ -44,20 +43,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $foutmelding = 'Toevoegen is mislukt. Bestaat de sleutel "' . htmlspecialchars($sleutel) . '" al?';
             }
         }
-    } elseif ($actie === 'bijwerken' || $actie === 'bijwerken_zonder_github') {
+    } elseif ($actie === 'bijwerken') {
         $sleutel       = $_POST['sleutel'] ?? '';
         $updateFeedUrl = trim($_POST['update_feed_url'] ?? '');
         $updateFeedUrl = $updateFeedUrl === '' ? null : $updateFeedUrl;
 
         if ($sleutel !== '') {
-            // feed_lokaal wordt hier meteen op de juiste waarde gezet, niet
-            // pas ná een geslaagde push: "0" betekent puur "niet bewust
-            // uitgesloten van Github", en bepaalt zo of deze rij de
-            // eerstvolgende keer (door wie dan ook getriggerd) wél of niet
-            // meegaat in lokaleCatalogusAlsArray().
-            $feedLokaal = $actie === 'bijwerken_zonder_github' ? 1 : 0;
-            $stmt = $pdo->prepare("UPDATE extensie_catalogus SET update_feed_url = ?, feed_lokaal = ? WHERE sleutel = ?");
-            $stmt->execute([$updateFeedUrl, $feedLokaal, $sleutel]);
+            $stmt = $pdo->prepare("UPDATE extensie_catalogus SET update_feed_url = ? WHERE sleutel = ?");
+            $stmt->execute([$updateFeedUrl, $sleutel]);
 
             if ($updateFeedUrl === null) {
                 // Geen feed-URL meer om te controleren - dus ook de eerder
@@ -69,14 +62,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // status van elke site met deze extensie.
                 $pdo->prepare("DELETE FROM nieuwste_versies WHERE naam = ?")->execute([$sleutel]);
                 $succesmelding = 'Update-feed-URL verwijderd, en de eerder opgehaalde "nieuwste versie" voor deze extensie is meteen opgeruimd - de status valt nu terug naar "Onbekend".';
-            } elseif ($actie === 'bijwerken_zonder_github') {
-                // Bewust NIET meesturen naar de auto-push hieronder: bedoeld
-                // voor een lokale uitzondering (bijv. een site-specifieke
-                // feed die een externe blokkade omzeilt, terwijl de
-                // gedeelde/Github-versie van deze sleutel bij andere
-                // installaties prima blijft werken en dus niet overschreven
-                // hoeft te worden).
-                $succesmelding = 'Update-feed-URL lokaal opgeslagen (niet naar Github gesynchroniseerd). Druk op "Scan en check sites" op de monitorpagina om de nieuwste versie meteen op te halen.';
             } else {
                 $succesmelding = 'Update-feed-URL opgeslagen. Druk op "Scan en check sites" op de monitorpagina om de nieuwste versie meteen op te halen. Deze feed geldt vanaf nu voor elke site die dezelfde extensie heeft.';
             }
@@ -161,27 +146,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $succesmelding = "$aantal extensie(s) (libraries/taalbestanden) in één keer genegeerd.";
     }
-
-    // ------------------------------------------------------------------
-    // Elke wijziging die de gedeelde feed-URL's raakt, automatisch naar
-    // Github pushen (als daar een repo + token voor is ingesteld) - zodat
-    // een collega met een eigen, losse installatie hem via de melding
-    // hieronder kan overnemen. Mislukt de push (bijv. geen internet, of
-    // een verlopen token), dan blijft de lokale wijziging gewoon staan;
-    // er verschijnt alleen een extra waarschuwing bij de succesmelding.
-    // ------------------------------------------------------------------
-    if (in_array($actie, ['toevoegen', 'bijwerken', 'verwijderen'], true) && $foutmelding === '' && $succesmelding !== '') {
-        $githubInstellingen = catalogusGithubInstellingen($pdo);
-        if (catalogusGithubIsIngesteld($githubInstellingen) && $githubInstellingen['token'] !== '') {
-            $eigenNaam     = trim(haalInstelling($pdo, 'login_gebruikersnaam', ''));
-            $pushResultaat = pushCatalogusNaarGithub($pdo, $eigenNaam);
-            if ($pushResultaat['succes']) {
-                $succesmelding .= ' Ook meteen naar Github gepusht.';
-            } else {
-                $succesmelding .= ' ⚠️ Pushen naar Github is niet gelukt: ' . $pushResultaat['foutmelding'];
-            }
-        }
-    }
 }
 
 // ----------------------------------------------------------------------
@@ -192,12 +156,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $alleSites = $pdo->query("SELECT id, domein FROM sites ORDER BY domein ASC")->fetchAll(PDO::FETCH_ASSOC);
 $geselecteerdeSiteId = isset($_GET['site_id']) ? (int) $_GET['site_id'] : 0;
 
-// Bepaalt of de "Opslaan met/zonder Github Sync"-keuze getoond wordt bij het
-// update-feed-veld hieronder. Zonder ingevoerde token kan er toch niet naar
-// Github gepusht worden (zie de auto-push hierboven, die precies dezelfde
-// token-check gebruikt) - dan is de keuze zelf zinloos en verwarrend, en
-// volstaat de simpele, originele "Opslaan"-knop.
-$githubTokenIngesteld = catalogusGithubInstellingen($pdo)['token'] !== '';
 
 $sleutelsOpGeselecteerdeSite = null; // null = geen filter (alle sites)
 $nieuwsteVersieAlBekendOpDezeSite = []; // sleutel => true als déze site al een automatische versie heeft
@@ -244,7 +202,7 @@ $genegeerdFilter = $toonGenegeerd ? '' : 'WHERE genegeerd = 0';
 // Gedeelde lijst: extensies MET een update-feed-URL - geldt voor alle sites,
 // dus altijd volledig getoond, ongeacht de sitekeuze hierboven.
 $metFeed = $pdo->query("
-    SELECT sleutel, label, manifest_pad, update_feed_url, feed_lokaal, genegeerd, genegeerd_op, negeer_laatste_versiedeel
+    SELECT sleutel, label, manifest_pad, update_feed_url, genegeerd, genegeerd_op, negeer_laatste_versiedeel
     FROM extensie_catalogus
     $genegeerdFilter " . ($genegeerdFilter ? 'AND' : 'WHERE') . " update_feed_url IS NOT NULL AND update_feed_url != ''
     ORDER BY genegeerd ASC, label ASC
@@ -253,7 +211,7 @@ $metFeed = $pdo->query("
 // Per-site lijst: extensies ZONDER update-feed-URL, gefilterd op de
 // geselecteerde site (indien gekozen).
 $zonderFeedRuw = $pdo->query("
-    SELECT sleutel, label, manifest_pad, update_feed_url, feed_lokaal, genegeerd, genegeerd_op, negeer_laatste_versiedeel
+    SELECT sleutel, label, manifest_pad, update_feed_url, genegeerd, genegeerd_op, negeer_laatste_versiedeel
     FROM extensie_catalogus
     $genegeerdFilter " . ($genegeerdFilter ? 'AND' : 'WHERE') . " (update_feed_url IS NULL OR update_feed_url = '')
     ORDER BY genegeerd ASC, label ASC
@@ -617,8 +575,6 @@ input[type="url"] {
     <div class="melding fout"><?php echo htmlspecialchars($foutmelding); ?></div>
 <?php endif; ?>
 
-<div id="github-catalogus-banner" style="display: none;"></div>
-
 <div class="site-kiezer">
     <form method="get" style="display: flex; align-items: center; gap: 10px;">
         <label for="site_id">Website:</label>
@@ -723,12 +679,6 @@ input[type="url"] {
     <td data-label="Sleutel"><code><?php echo htmlspecialchars($extensie['sleutel']); ?></code></td>
     <td data-label="Label">
         <?php echo htmlspecialchars($extensie['label']); ?>
-        <?php $isFeedLokaal = (int) ($extensie['feed_lokaal'] ?? 0) === 1; ?>
-        <?php if ($isFeedLokaal): ?>
-            <br><span class="badge-automatisch" style="background: var(--thema-geel); color: var(--thema-bg);">💻 lokaal (niet op Github)</span>
-        <?php else: ?>
-            <br><span class="badge-gedeeld">☁️ gedeeld via Github</span>
-        <?php endif; ?>
         <?php if ($isGenegeerd): ?><br><span class="badge-automatisch">genegeerd<?php echo $extensie['genegeerd_op'] ? ' op ' . htmlspecialchars(date('d-m-Y H:i', strtotime($extensie['genegeerd_op']))) : ''; ?></span><?php endif; ?>
     </td>
     <td data-label="Manifest-pad"><?php echo $extensie['manifest_pad'] ? htmlspecialchars($extensie['manifest_pad']) : '<em>geen</em>'; ?></td>
@@ -737,14 +687,7 @@ input[type="url"] {
             <?php echo csrfVeld(); ?>
             <input type="hidden" name="sleutel" value="<?php echo htmlspecialchars($extensie['sleutel']); ?>">
             <textarea name="update_feed_url" rows="2" placeholder="volledig adres van de update-feed (https://...)"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
-            <?php if ($githubTokenIngesteld): ?>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-                <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan met GitHub Sync</button>
-                <button type="submit" name="actie" value="bijwerken_zonder_github" class="knop opslaan" style="background: #767676;" title="Voor een lokale uitzondering die alleen op deze installatie hoeft te gelden - andere installaties (bijv. Astrid's) blijven ongemoeid.">Opslaan zonder GitHub Sync</button>
-            </div>
-            <?php else: ?>
             <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan</button>
-            <?php endif; ?>
         </form>
     </td>
     <td data-label="Actie">
@@ -833,14 +776,7 @@ input[type="url"] {
             <?php echo csrfVeld(); ?>
             <input type="hidden" name="sleutel" value="<?php echo htmlspecialchars($extensie['sleutel']); ?>">
             <textarea name="update_feed_url" rows="2" placeholder="volledig adres van de update-feed (https://...)"><?php echo htmlspecialchars($extensie['update_feed_url'] ?? ''); ?></textarea>
-            <?php if ($githubTokenIngesteld): ?>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-                <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan met GitHub Sync</button>
-                <button type="submit" name="actie" value="bijwerken_zonder_github" class="knop opslaan" style="background: #767676;" title="Voor een lokale uitzondering die alleen op deze installatie hoeft te gelden - andere installaties (bijv. Astrid's) blijven ongemoeid.">Opslaan zonder GitHub Sync</button>
-            </div>
-            <?php else: ?>
             <button type="submit" name="actie" value="bijwerken" class="knop opslaan">Opslaan</button>
-            <?php endif; ?>
         </form>
     </td>
     <td data-label="Actie">
@@ -932,105 +868,6 @@ input[type="url"] {
 <script>
 const CSRF_TOKEN = <?php echo json_encode(haalCsrfToken()); ?>;
 
-// ----------------------------------------------------------------------
-// Github-synchronisatie: bij het laden van de pagina controleren of er
-// nieuwe/gewijzigde update-feed-URL's op Github staan t.o.v. deze lokale
-// installatie, en als dat zo is een banner tonen met een importknop.
-// Alleen actief als er bij Configuratie een Github-repo is ingesteld -
-// anders geeft de AJAX-aanroep gewoon een lege lijst terug (geen fout).
-// ----------------------------------------------------------------------
-function escapeHtmlGithubBanner(tekst) {
-    const div = document.createElement('div');
-    div.textContent = tekst == null ? '' : String(tekst);
-    return div.innerHTML;
-}
-
-function controleerGithubCatalogus() {
-    const banner = document.getElementById('github-catalogus-banner');
-
-    fetch('catalogus_github_ajax.php?actie=controleer')
-        .then(r => r.json())
-        .then(data => {
-            if (!data.succes) {
-                if (data.foutmelding) {
-                    banner.style.display = 'block';
-                    banner.innerHTML = '<div class="melding fout">⚠️ Ophalen van de Github-catalogus is niet gelukt: '
-                        + escapeHtmlGithubBanner(data.foutmelding) + '</div>';
-                }
-                return; // geen repo ingesteld, of een fout - niets te melden
-            }
-
-            const totaal = data.nieuw.length + data.gewijzigd.length;
-            if (totaal === 0) {
-                return; // niets nieuws, banner blijft verborgen
-            }
-
-            let regels = '';
-            data.nieuw.forEach(item => {
-                regels += '<label style="display: block; margin: 4px 0;">'
-                    + '<input type="checkbox" class="github-item-checkbox" value="' + escapeHtmlGithubBanner(item.sleutel) + '" checked> '
-                    + '<strong>' + escapeHtmlGithubBanner(item.label || item.sleutel) + '</strong> (nieuw) — '
-                    + '<code>' + escapeHtmlGithubBanner(item.update_feed_url || '') + '</code></label>';
-            });
-            data.gewijzigd.forEach(item => {
-                regels += '<label style="display: block; margin: 4px 0;">'
-                    + '<input type="checkbox" class="github-item-checkbox" value="' + escapeHtmlGithubBanner(item.sleutel) + '"> '
-                    + '<strong>' + escapeHtmlGithubBanner(item.label) + '</strong> (gewijzigd) — '
-                    + 'nu: <code>' + escapeHtmlGithubBanner(item.lokale_url) + '</code> → '
-                    + 'Github: <code>' + escapeHtmlGithubBanner(item.github_url) + '</code></label>';
-            });
-
-            const wie = data.bijgewerkt_door ? ' door ' + escapeHtmlGithubBanner(data.bijgewerkt_door) : '';
-
-            banner.style.display = 'block';
-            banner.innerHTML = '<div class="melding" style="background: #fff3cd; color: #665200; border: 1px solid #ffe69c;">'
-                + '<strong>🔄 Er staan ' + totaal + ' update-feed-URL(s) op Github' + wie + ' die je nog niet lokaal hebt.</strong>'
-                + ' Vink aan wat je wil overnemen (nieuwe items staan al aangevinkt, gewijzigde bewust niet):'
-                + '<div style="margin: 10px 0;">' + regels + '</div>'
-                + '<button type="button" class="knop opslaan" onclick="importeerGeselecteerdeGithubItems(this)">⬇️ Geselecteerde items importeren</button>'
-                + ' <span id="github-import-resultaat"></span>'
-                + '</div>';
-        })
-        .catch(() => {
-            // Stil falen - een verbindingsprobleem hier mag de rest van de pagina niet verstoren.
-        });
-}
-
-function importeerGeselecteerdeGithubItems(knop) {
-    const sleutels = Array.from(document.querySelectorAll('.github-item-checkbox:checked')).map(el => el.value);
-    const resultaat = document.getElementById('github-import-resultaat');
-
-    if (sleutels.length === 0) {
-        resultaat.textContent = 'Selecteer eerst minstens één item.';
-        return;
-    }
-
-    knop.disabled = true;
-    resultaat.textContent = '⏳ Bezig met importeren...';
-
-    const body = new FormData();
-    body.append('csrf_token', CSRF_TOKEN);
-    body.append('actie', 'importeer');
-    sleutels.forEach(sleutel => body.append('sleutels[]', sleutel));
-
-    fetch('catalogus_github_ajax.php', { method: 'POST', body: body })
-        .then(r => r.json())
-        .then(data => {
-            knop.disabled = false;
-            if (!data.succes) {
-                resultaat.textContent = '❌ ' + data.foutmelding;
-                return;
-            }
-            resultaat.textContent = '✅ ' + data.aantal + ' item(s) geïmporteerd - de pagina wordt herladen...';
-            setTimeout(() => window.location.reload(), 1200);
-        })
-        .catch(err => {
-            knop.disabled = false;
-            resultaat.textContent = '❌ Er ging iets mis: ' + err.message;
-        });
-}
-
-controleerGithubCatalogus();
 
 function toonFormulier() {
     document.getElementById('toevoegformulier').style.display = 'block';

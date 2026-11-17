@@ -89,6 +89,7 @@ staan in de database en blijven gewoon bewaard.
      geheime_sleutel.php
      installatie.voltooid
      images/          (bevat je eigen logo, als je dat hebt geüpload)
+     uitbreidingen/   (alleen als je een losse uitbreiding gebruikt)
      .htaccess        (alleen als je die zelf hebt aangemaakt)
 3. Upload de inhoud van de Source code (zip) van de laatste release
    (zonder de map .github).

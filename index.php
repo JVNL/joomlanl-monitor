@@ -981,6 +981,9 @@ foreach ($sites as $siteVoorTelling) {
     </div>
     <div class="overzicht-knoppen">
         <a class="knop" href="hosting_overzicht.php?categorie=<?php echo urlencode($categorie); ?>" title="Per website: hostingpartij, server en IP-adres (live opgezocht)"><span class="icoon-glyph">🖥️</span> Hostingoverzicht</a>
+        <?php if (is_file(__DIR__ . '/uitbreidingen/updates/updates.php')): ?>
+            <a class="knop" href="uitbreidingen/updates/updates.php"><span class="icoon-glyph">📦</span> Updates</a>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -1003,7 +1006,7 @@ foreach ($sites as $siteVoorTelling) {
 <div class="tabel-scroll-kader">
 <table class="responsive-tabel">
 <tr>
-    <th style="width: 240px;"><?php echo sorteerKopLink('domein', 'Domein', '▲', 'Sorteer alfabetisch op domein', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('site-instellingen', 'Klik op de domeinnaam om rechtstreeks in te loggen bij het Joomla-beheer van deze site (in een nieuw tabblad).'); ?></th>
+    <th style="width: 240px;"><?php echo sorteerKopLink('domein', 'Domein', '▲', 'Sorteer alfabetisch op domein', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('statussen', 'Klik op de domeinnaam om rechtstreeks in te loggen bij het Joomla-beheer van deze site (in een nieuw tabblad).'); ?></th>
     <th style="width: 100px;">Website<?php echo hulpIcoon('statussen', 'Online/Offline wordt bepaald door de website zelf op te vragen - een foutcode (403/500/etc.), geen verbinding, of verdachte inhoud in de reactie telt als Offline.'); ?></th>
     <th style="width: 90px;"><?php echo sorteerKopLink('joomla', 'Joomla', '▼', 'Sorteer op Joomla versie', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('statussen', 'De geïnstalleerde Joomla-kernversie, opgehaald via het admin-pad. Rood betekent dat er een nieuwere versie binnen dezelfde hoofdversie beschikbaar is.'); ?></th>
     <th style="width: 70px;"><?php echo sorteerKopLink('php', 'PHP', '▼', 'Sorteer op PHP versie (oudste eerst)', $categorie, $sorteerOp, $richting); ?><?php echo hulpIcoon('php-versie', 'De PHP-versie waarop de website draait, gemeld door het scanscript bij elke scan. Leeg betekent dat de site nog niet is gescand sinds deze kolom bestaat.'); ?></th>

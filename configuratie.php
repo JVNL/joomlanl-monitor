@@ -8,7 +8,6 @@ require_once 'config.php';
 require_once 'versie.php';
 require_once 'instellingen_functies.php';
 require_once 'csrf_functies.php';
-require_once 'catalogus_github_sync.php';
 
 $foutmelding   = '';
 $succesmelding = '';
@@ -259,40 +258,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } catch (PDOException $e) {
                 $foutmelding = 'Verbinden met deze gegevens is mislukt - er is niets gewijzigd: ' . $e->getMessage();
             }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Github-synchronisatie van de extensie-catalogus (update-feed-URL's
-    // delen tussen losse installaties, zie extensie_beheer.php).
-    // ------------------------------------------------------------------
-    if ($actie === 'github_instellingen_opslaan') {
-        $nieuwToken   = trim($_POST['catalogus_github_token'] ?? '');
-        $tokenBehouden = ($_POST['catalogus_github_token_behouden'] ?? '') === '1';
-
-        // Een leeg token-veld bij het opslaan betekent NIET automatisch
-        // "token verwijderen" - anders zou dit veld bij elke opslag van
-        // deze sectie opnieuw ingevuld moeten worden. Alleen als het
-        // veld zichtbaar is aangepast (zie JS: "token_behouden" wordt op
-        // "0" gezet zodra iemand in het veld typt) wordt de nieuwe
-        // waarde (ook als die leeg is, om het token juist te wissen) opgeslagen.
-        if (!$tokenBehouden) {
-            slaInstellingOp($pdo, 'catalogus_github_token', versleutelWaarde($nieuwToken));
-        }
-
-        $succesmelding = 'Github-token opgeslagen.';
-    }
-
-    // Handmatig een keer pushen/importeren via een los knopje (los van de
-    // AJAX-acties op extensie_beheer.php, voor het geval iemand liever
-    // alles op deze pagina afhandelt).
-    if ($actie === 'github_nu_pushen') {
-        $eigenNaam = trim(haalInstelling($pdo, 'login_gebruikersnaam', ''));
-        $resultaat = pushCatalogusNaarGithub($pdo, $eigenNaam);
-        if ($resultaat['succes']) {
-            $succesmelding = 'Catalogus succesvol naar Github gepusht.';
-        } else {
-            $foutmelding = $resultaat['foutmelding'];
         }
     }
 }
@@ -852,7 +817,7 @@ header .knop {
 </div>
 
 <div class="blok">
-    <h2>Database-gegevens<?php echo hulpIcoon('configuratie', 'Alleen-lezen overzicht van de databaseverbinding van de monitor zelf, puur ter referentie (bijv. bij het maken van een back-up).'); ?></h2>
+    <h2>Database-gegevens<?php echo hulpIcoon('configuratie', 'De databaseverbinding van de monitor zelf. Nieuwe gegevens worden eerst getest voordat ze worden opgeslagen.'); ?></h2>
     <div class="blok-uitleg">
         Deze gegevens worden vóór het opslaan eerst getest - lukt de verbinding niet, dan wordt er niets gewijzigd,
         zodat je jezelf niet per ongeluk kan buitensluiten.
@@ -882,56 +847,7 @@ header .knop {
 </div>
 
 <div class="blok">
-    <h2>🔄 Github-synchronisatie catalogus<?php echo hulpIcoon('configuratie', 'Deelt de update-feed-URL\'s uit "Extensies beheren" automatisch met andere installaties via een gedeelde catalogus op Github. Werkt direct, zonder instellingen - alleen wie zelf mag bijdragen (schrijfrechten) hoeft hier een eigen token in te vullen.'); ?></h2>
-    <div class="blok-uitleg">
-        Deze installatie leest automatisch mee met een gedeelde catalogus van update-feed-URL's op Github (alleen de
-        sleutel, het label, het manifestpad en de update-feed-URL van elke extensie - <strong>nooit</strong> site- of
-        klantgegevens). Bij "Extensies beheren" verschijnt vanzelf een melding zodra daar iets nieuws of gewijzigds
-        in staat. Hier hoef je verder niets voor in te stellen.
-    </div>
-
-    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; margin-top: 10px;">
-        <input type="checkbox" id="catalogus_github_beheerder_schakelaar" style="width: auto;" onchange="document.getElementById('catalogus_github_beheerder_blok').style.display = this.checked ? 'block' : 'none';">
-        <span>Ik ben beheerder met schrijfrechten op deze repository</span>
-    </label>
-    <div class="uitleg" style="margin-top: 4px; margin-bottom: 10px;">
-        Alleen aanvinken als je zelf ook wijzigingen mag <em>terugsturen</em> naar de gedeelde catalogus - voor
-        gewoon gebruik (lezen) is dit niet nodig, dat werkt namelijk al vanzelf.
-    </div>
-
-    <div id="catalogus_github_beheerder_blok" style="display: none;">
-        <form method="post">
-            <input type="hidden" name="actie" value="github_instellingen_opslaan">
-            <input type="hidden" name="catalogus_github_token_behouden" id="catalogus_github_token_behouden" value="1">
-            <?php echo csrfVeld(); ?>
-
-            <label for="catalogus_github_token">Github-token</label>
-            <div class="uitleg">
-                Een "fine-grained" personal access token met "Contents: Read and write" op de gedeelde catalogus-repo.
-            </div>
-            <div class="wachtwoord-veld">
-                <input type="password" id="catalogus_github_token" name="catalogus_github_token"
-                    value="<?php echo haalInstelling($pdo, 'catalogus_github_token', '') !== '' ? '••••••••••••••••' : ''; ?>"
-                    autocomplete="new-password"
-                    oninput="document.getElementById('catalogus_github_token_behouden').value = '0';">
-                <button type="button" class="oogje" onclick="toonWachtwoord('catalogus_github_token', this)"><span class="icoon-glyph">👁️</span></button>
-            </div>
-
-            <button type="submit" class="knop opslaan">Opslaan</button>
-        </form>
-
-        <?php if (haalInstelling($pdo, 'catalogus_github_token', '') !== ''): ?>
-        <form method="post" style="margin-top: 10px;">
-            <input type="hidden" name="actie" value="github_nu_pushen">
-            <?php echo csrfVeld(); ?>
-            <button type="submit" class="knop" style="background: #24292e;">⬆️ Nu handmatig pushen naar Github</button>
-        </form>
-        <?php endif; ?>
-    </div>
-</div>
-
-<div class="blok">
-    <h2>Site-scanscript <?php echo hulpIcoon('sites-toevoegen', 'Elke site krijgt een eigen, unieke scanscript-bestandsnaam. Hier kun je het scanscript bij bestaande sites bulksgewijs naar deze site sturen, of migreren naar het nieuwste naamgevingspatroon.'); ?></h2>
+    <h2>Site-scanscript <?php echo hulpIcoon('scanscript-naam', 'Elke site krijgt een eigen, unieke scanscript-bestandsnaam. Hier kun je het scanscript bij bestaande sites bulksgewijs naar deze site sturen, of migreren naar het nieuwste naamgevingspatroon.'); ?></h2>
     <div class="blok-uitleg">
         Elke site heeft tegenwoordig een eigen, uniek gegenereerde scanscript-bestandsnaam (in plaats van bij elke
         site dezelfde, voorspelbare standaardnaam) - dat is veiliger, en zorgt ervoor dat de monitor een teruggevonden
@@ -974,7 +890,7 @@ header .knop {
 </div>
 
 <div class="blok">
-    <h2>🛡️ Admin Tools: informatie voor .htaccess-maker <?php echo hulpIcoon('site-instellingen', 'Admin Tools blokkeert het scanscript standaard, tenzij de exacte bestandsnaam als uitzondering wordt toegevoegd in de .htaccess-maker. Dit overzicht toont die naam per site.'); ?></h2>
+    <h2>🛡️ Admin Tools: informatie voor .htaccess-maker <?php echo hulpIcoon('admin-tools', 'Admin Tools blokkeert het scanscript standaard, tenzij de exacte bestandsnaam als uitzondering wordt toegevoegd in de .htaccess-maker. Dit overzicht toont die naam per site.'); ?></h2>
     <div class="blok-uitleg">
         Gebruikt een site Akeeba Admin Tools, dan moet de unieke scanscript-bestandsnaam van die site worden
         toegevoegd aan de "Allow direct access to these files"-lijst in de .htaccess-maker (zie hoofdstuk 3 van de
@@ -1045,35 +961,6 @@ header .knop {
         wachtwoorden.
     </div>
 </div>
-
-<?php if (is_readable(__DIR__ . '/maak_installatiepakket.php') && is_readable(__DIR__ . '/maak_updatepakket.php') && is_readable(__DIR__ . '/pakket_voorbereiden.php')): ?>
-<div class="blok">
-    <h2>📦 Installatie- en updatepakket<?php echo hulpIcoon('backups-installatie', 'Stelt een kant-en-klaar .zip-bestand samen om de monitor-software zelf te installeren of bij te werken naar de huidige versie.'); ?></h2>
-    <div class="blok-uitleg">
-        Wil je deze monitor met iemand anders delen, of bij iemand die 'm al gebruikt een update installeren? Stel
-        hieronder het juiste pakket samen - beide bevatten <strong>geen</strong> persoonlijke gegevens (geen
-        wachtwoorden, geen sites, geen eigen instellingen). Deze mogelijkheid zelf wordt bewust niet meegestuurd in
-        zo'n pakket - alleen jij kan dus nieuwe installatie-/updatepakketten maken.
-    </div>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
-        <form method="post" action="pakket_voorbereiden.php">
-            <?php echo csrfVeld(); ?>
-            <input type="hidden" name="pakket_type" value="installatie">
-            <button type="submit" class="knop download">⬇️ Nieuw installatiepakket (voor iemand die nog begint)</button>
-        </form>
-        <form method="post" action="pakket_voorbereiden.php">
-            <?php echo csrfVeld(); ?>
-            <input type="hidden" name="pakket_type" value="update">
-            <button type="submit" class="knop" style="background: #6f42c1;">⬇️ Updatepakket (voor bestaande gebruikers)</button>
-        </form>
-    </div>
-    <div class="blok-uitleg" style="margin-top: 15px;">
-        Het installatiepakket bevat een installatiewizard die de database automatisch inricht. Het updatepakket
-        bevat alleen de broncode - de ontvanger hoeft die alleen te uploaden; de database werkt zichzelf daarna
-        automatisch bij, zonder handmatige SQL-import.
-    </div>
-</div>
-<?php endif; ?>
 
 <div class="blok" style="text-align: center;">
     <div class="blok-uitleg" style="margin-bottom: 10px;">
